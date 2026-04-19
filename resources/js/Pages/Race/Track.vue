@@ -134,8 +134,10 @@ function gameLoop() {
     const isBraking = keys.s;
     const engineForce = drivetrain.update(wheelSpeed, throttleInput, isBraking, dt);
 
-    // Steering
-    const maxSteer = 0.4;
+    // Steering — reduces at high speed for realistic understeer
+    const vel = physics.chassisBody.velocity;
+    const speed = Math.sqrt(vel.x * vel.x + vel.z * vel.z) * 3.6; // km/h
+    const maxSteer = 0.4 * (1 - Math.min(speed / 100, 0.65));
     let steering = 0;
     if (keys.a) steering = maxSteer;
     if (keys.d) steering = -maxSteer;
@@ -161,15 +163,16 @@ function gameLoop() {
     scene.syncMeshToBody(playerMesh, physics.chassisBody, physics.wheelBodies);
 
     // Update telemetry
-    const vel = physics.chassisBody.velocity;
-    const speed = Math.sqrt(vel.x * vel.x + vel.z * vel.z) * 3.6;
     currentSpeed.value = Math.round(speed);
     currentRPM.value = Math.round(drivetrain.rpm);
     currentGear.value = drivetrain.gearLabel;
     currentFuel.value = Math.round(drivetrain.fuel * 10) / 10;
 
-    // Camera
-    scene.updateCamera(playerMesh);
+    // Camera — velocity-aware chase cam
+    scene.updateCamera(playerMesh, vel);
+
+    // Interpolate remote players
+    scene.lerpRemotePlayers(0.15);
 
     // Network sync
     if (network && connected.value) {
