@@ -166,41 +166,57 @@ export class SceneManager {
     }
 
     syncMeshToBody(mesh, chassisBody, wheelBodies) {
+        if (!mesh || !chassisBody) return;
+
         // Chassis
         mesh.position.copy(chassisBody.position);
         mesh.quaternion.copy(chassisBody.quaternion);
 
-        // Wheels
+        // Wheels — position from physics, keep initial cylinder rotation (Z = PI/2)
         if (mesh.wheels && wheelBodies) {
             mesh.wheels.forEach((wheelMesh, i) => {
-                if (wheelBodies[i]) {
-                    const wp = wheelBodies[i].position;
-                    const wq = wheelBodies[i].quaternion;
-                    // Convert world position to local
-                    wheelMesh.position.copy(
-                        new THREE.Vector3(wp.x, wp.y, wp.z)
-                            .sub(new THREE.Vector3(chassisBody.position.x, chassisBody.position.y, chassisBody.position.z))
-                            .applyQuaternion(
-                                new THREE.Quaternion(
-                                    chassisBody.quaternion.x,
-                                    chassisBody.quaternion.y,
-                                    chassisBody.quaternion.z,
-                                    chassisBody.quaternion.w
-                                ).invert()
-                            )
+                if (!wheelBodies[i]) return;
+
+                const wp = wheelBodies[i].position;
+                // Convert world position to chassis-local space
+                const localPos = new THREE.Vector3(wp.x, wp.y, wp.z)
+                    .sub(new THREE.Vector3(
+                        chassisBody.position.x,
+                        chassisBody.position.y,
+                        chassisBody.position.z,
+                    ))
+                    .applyQuaternion(
+                        new THREE.Quaternion(
+                            chassisBody.quaternion.x,
+                            chassisBody.quaternion.y,
+                            chassisBody.quaternion.z,
+                            chassisBody.quaternion.w,
+                        ).invert()
                     );
-                    // World quaternion relative to chassis
-                    const chassisQInv = new THREE.Quaternion(
-                        chassisBody.quaternion.x,
-                        chassisBody.quaternion.y,
-                        chassisBody.quaternion.z,
-                        chassisBody.quaternion.w
-                    ).invert();
-                    const worldWheelQ = new THREE.Quaternion(wq.x, wq.y, wq.z, wq.w);
-                    wheelMesh.quaternion.copy(chassisQInv.multiply(worldWheelQ));
-                    // Keep the cylinder rotation
-                    wheelMesh.rotateZ(Math.PI / 2);
-                }
+                wheelMesh.position.copy(localPos);
+
+                // Rotation: use physics quaternion then apply the cylinder
+                // “up-to-axle” flip so the cylinder disc faces sideways.
+                const chassisQInv = new THREE.Quaternion(
+                    chassisBody.quaternion.x,
+                    chassisBody.quaternion.y,
+                    chassisBody.quaternion.z,
+                    chassisBody.quaternion.w,
+                ).invert();
+                const worldWheelQ = new THREE.Quaternion(
+                    wheelBodies[i].quaternion.x,
+                    wheelBodies[i].quaternion.y,
+                    wheelBodies[i].quaternion.z,
+                    wheelBodies[i].quaternion.w,
+                );
+                // Local-space wheel rotation
+                const localQ = chassisQInv.multiply(worldWheelQ);
+                // Cylinder is Y-up; axle is X. Rotate 90° around Z to
+                // orient the disc perpendicular to the axle.
+                const cylFix = new THREE.Quaternion().setFromAxisAngle(
+                    new THREE.Vector3(0, 0, 1), Math.PI / 2,
+                );
+                wheelMesh.quaternion.copy(localQ.multiply(cylFix));
             });
         }
     }

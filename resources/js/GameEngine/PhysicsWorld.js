@@ -234,6 +234,16 @@ export class PhysicsWorld {
         }
     }
 
+    /**
+     * Diagnostic: returns array of booleans indicating ground contact per wheel.
+     * Call from game loop to verify raycasts are hitting the track.
+     * @returns {boolean[]}
+     */
+    getWheelContacts() {
+        if (!this.vehicle) return [];
+        return this.vehicle.wheelInfos.map((w) => w.isInContact);
+    }
+
     /** Average absolute angular speed of the rear wheels (indices 2, 3) in rad/s */
     getRearWheelSpeed() {
         if (!this.vehicle) return 0;

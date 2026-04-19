@@ -32,6 +32,7 @@ let drivetrain = null;
 let playerMesh = null;
 let animFrame = null;
 let lastTime = 0;
+let _contactLogTimer = 0;
 
 // Input state
 const keys = { w: false, a: false, s: false, d: false };
@@ -69,7 +70,7 @@ async function initGame() {
 
     // ── Local init (MUST succeed — no network dependency) ────────
     try {
-        // Drivetrain
+        console.info('[Race] Step 1/5: Creating drivetrain...');
         drivetrain = new Drivetrain({
             engine_torque_nm: props.bus.engine_torque_nm,
             gear_ratios: props.bus.gear_ratios,
@@ -78,18 +79,21 @@ async function initGame() {
         });
         fuelCapacity.value = props.bus.fuel_capacity_liters;
         currentFuel.value = props.bus.current_fuel_liters;
+        console.info('[Race] Step 1/5: Drivetrain OK — gears:', drivetrain.gearCount, 'torque:', drivetrain.peakTorque, 'Nm');
 
-        // Physics
+        console.info('[Race] Step 2/5: Creating physics world + vehicle...');
         physics = new PhysicsWorld();
         physics.createVehicle({
             base_weight_kg: props.bus.base_weight_kg,
             suspension_stiffness: props.bus.suspension_stiffness,
         });
+        console.info('[Race] Step 2/5: Physics OK — wheels:', physics.vehicle?.wheelInfos?.length, 'mass:', physics.chassisBody?.mass);
 
-        // Scene
+        console.info('[Race] Step 3/5: Creating 3D scene...');
         scene = new SceneManager(canvasRef.value);
         const color = hexToInt(props.bus.paint_hex);
         playerMesh = scene.createBusMesh(color);
+        console.info('[Race] Step 3/5: Scene OK — visual wheels:', playerMesh?.wheels?.length);
 
         // Input
         window.addEventListener('keydown', onKeyDown);
@@ -98,15 +102,17 @@ async function initGame() {
         // Start game loop — runs even without network
         isLoading.value = false;
         lastTime = performance.now();
+        console.info('[Race] Step 4/5: Starting game loop (physics + render)');
         gameLoop();
     } catch (err) {
         console.error('[Race] Failed to initialise game:', err);
-        initError.value = err.message || 'Error desconocido';
+        initError.value = err?.message || 'Error desconocido';
         isLoading.value = false;
         return;
     }
 
     // ── Network (non-fatal — game runs offline) ─────────────────
+    console.info('[Race] Step 5/5: Connecting to game server...');
     try {
         network = new NetworkManager('ws://localhost:2567');
         network.onPlayerJoin((sessionId) => {
@@ -125,8 +131,9 @@ async function initGame() {
             weight: props.bus.base_weight_kg,
         });
         connected.value = true;
+        console.info('[Race] Step 5/5: Connected to game server');
     } catch (err) {
-        console.warn('[Race] Could not connect to game server:', err?.message);
+        console.warn('[Race] Step 5/5: Could not connect to game server (offline mode):', err?.message);
     }
 }
 
@@ -172,6 +179,15 @@ function gameLoop() {
 
     // Step physics
     physics.step(dt);
+
+    // Diagnostic: log wheel ground contact once per second
+    _contactLogTimer += dt;
+    if (_contactLogTimer >= 1.0) {
+        _contactLogTimer = 0;
+        const contacts = physics.getWheelContacts();
+        const force = engineForce;
+        console.info('[Physics Engine] contacts:', contacts, 'engineForce:', Math.round(force), 'N, speed:', Math.round(speed), 'km/h');
+    }
 
     // Sync visual
     scene.syncMeshToBody(playerMesh, physics.chassisBody, physics.wheelBodies);
