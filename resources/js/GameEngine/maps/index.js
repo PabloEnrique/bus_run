@@ -4,10 +4,16 @@
  */
 import cityMap from './city.js';
 import highwayMap from './highway.js';
+import circuitMap from './circuit.js';
+import flatCityMap from './flat-city.js';
+import mountainHighwayMap from './mountain-highway.js';
 
 const MAPS = new Map([
     [cityMap.id, cityMap],
     [highwayMap.id, highwayMap],
+    [circuitMap.id, circuitMap],
+    [flatCityMap.id, flatCityMap],
+    [mountainHighwayMap.id, mountainHighwayMap],
 ]);
 
 /**

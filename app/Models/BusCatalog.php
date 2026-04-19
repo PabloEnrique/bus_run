@@ -26,8 +26,11 @@ class BusCatalog extends Model
         'axle_track_m',
         'engine_hp',
         'redline_rpm',
+        'idle_rpm',
         'peak_torque_rpm_low',
         'peak_torque_rpm_high',
+        'torque_idle_nm',
+        'torque_redline_nm',
         'drag_coefficient',
         'thumbnail_url',
     ];
@@ -47,8 +50,11 @@ class BusCatalog extends Model
             'axle_track_m' => 'float',
             'engine_hp' => 'integer',
             'redline_rpm' => 'integer',
+            'idle_rpm' => 'integer',
             'peak_torque_rpm_low' => 'integer',
             'peak_torque_rpm_high' => 'integer',
+            'torque_idle_nm' => 'integer',
+            'torque_redline_nm' => 'integer',
             'drag_coefficient' => 'float',
         ];
     }

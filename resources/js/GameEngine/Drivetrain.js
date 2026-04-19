@@ -1,89 +1,140 @@
 /**
  * @module Drivetrain
- * Drivetrain simulation — per-bus powerband, RPM with engine inertia,
- * torque curve, gear shifting, aerodynamic drag, rolling resistance,
- * and fuel consumption.
+ * High-fidelity drivetrain — per-bus torque curve from JSON specs,
+ * rigid RPM-to-wheel coupling (direct drive), fuel cut limiter,
+ * automatic clutch slip at low RPM, and aerodynamic drag model.
  *
- * ## Per-Bus Powerband
- * Each bus defines its own `redline_rpm`, `peak_torque_rpm_low`,
- * `peak_torque_rpm_high`, and `engine_hp`. The torque curve shape is
- * the same but shifts according to these per-bus values.
+ * ## Torque Curve (5-point interpolation)
+ * Built from per-bus anchor points every 50 RPM:
+ *   (0, 0) → (idle_rpm, torque_idle) → (peak_start, peak_torque) →
+ *   (peak_end, peak_torque) → (redline, torque_redline)
  *
- * ## Aerodynamic Drag
- * `F_drag = 0.5 × ρ × Cd × A × v²` where:
- * - ρ = 1.225 kg/m³ (air density at sea level)
- * - Cd = drag_coefficient from bus specs (includes frontal area)
- * - v = vehicle speed in m/s
- * Top speed emerges naturally when drag + rolling resistance = engine force.
+ * ## Direct Drive
+ * RPM = wheelSpeed × gearRatio × FINAL_DRIVE_RATIO × 60 / (2π).
+ * No inertia blending — RPM is rigidly coupled to wheel rotation.
  *
- * ## Rolling Resistance
- * `F_roll = Crr × mass × g` (constant force opposing motion)
+ * ## Automatic Clutch
+ * When computed RPM < idle_rpm, clutch disengages proportionally
+ * (clutch = computedRPM / idle_rpm). Engine holds at idle RPM.
+ *
+ * ## Fuel Cut
+ * When RPM >= max_rpm, engine force = 0. Resumes at max_rpm - 100.
  */
 
-/** @constant {number} Engine idle speed in RPM */
-const IDLE_RPM = 800;
-/** @constant {number} Default redline */
-const DEFAULT_REDLINE_RPM = 3200;
 /** @constant {number} Final-drive (differential) ratio */
 const FINAL_DRIVE_RATIO = 2.8;
 /** @constant {number} Tyre rolling radius in metres — must match PhysicsWorld */
 const WHEEL_RADIUS = 0.35;
 /** @constant {number} Base fuel consumption rate (L / s / load-unit) */
 const FUEL_RATE_BASE = 0.00008;
-/** @constant {number} Engine inertia factor (s⁻¹) */
-const ENGINE_INERTIA = 5.0;
 /** @constant {number} Air density at sea level (kg/m³) */
 const AIR_DENSITY = 1.225;
 /** @constant {number} Rolling resistance coefficient (asphalt) */
 const ROLLING_RESISTANCE_COEFF = 0.008;
 /** @constant {number} Gravity (m/s²) */
 const GRAVITY = 9.82;
-/** @constant {number} Clutch engagement time in seconds (0→1) */
-const CLUTCH_ENGAGE_TIME = 0.8;
-/** @constant {number} Idle creep force in Newtons (forward push when in gear, no throttle, no brake) */
+/** @constant {number} Idle creep force in Newtons */
 const IDLE_CREEP_FORCE = 350;
+/** @constant {number} Clutch engagement time in seconds (for gear shifts) */
+const CLUTCH_ENGAGE_TIME = 0.8;
+/** @constant {number} Step size for torque interpolation table */
+const TORQUE_TABLE_STEP = 50;
+
+/**
+ * Build a linearly-interpolated torque lookup table (Nm) every TORQUE_TABLE_STEP RPM.
+ *
+ * Anchor points (5):
+ *   (0, 0) → (idleRpm, idleTorque) → (peakStart, peakTorque) →
+ *   (peakEnd, peakTorque) → (redline, redlineTorque)
+ *
+ * @param {number} idleRpm
+ * @param {number} redline
+ * @param {number} idleTorque    — Nm at idle
+ * @param {number} peakTorque    — Nm at peak plateau
+ * @param {number} peakStart     — RPM where peak plateau begins
+ * @param {number} peakEnd       — RPM where peak plateau ends
+ * @param {number} redlineTorque — Nm at redline
+ * @returns {Float64Array} — torque[i] = Nm at RPM = i × TORQUE_TABLE_STEP
+ */
+function buildTorqueTable(idleRpm, redline, idleTorque, peakTorque, peakStart, peakEnd, redlineTorque) {
+    const anchors = [
+        [0, 0],
+        [idleRpm, idleTorque],
+        [peakStart, peakTorque],
+        [peakEnd, peakTorque],
+        [redline, redlineTorque],
+    ];
+
+    const size = Math.floor(redline / TORQUE_TABLE_STEP) + 2;
+    const table = new Float64Array(size);
+
+    for (let i = 0; i < size; i++) {
+        const rpm = i * TORQUE_TABLE_STEP;
+        if (rpm >= redline) {
+            table[i] = redlineTorque;
+            continue;
+        }
+
+        // Find surrounding anchors
+        let lo = anchors[0];
+        let hi = anchors[anchors.length - 1];
+        for (let a = 0; a < anchors.length - 1; a++) {
+            if (rpm >= anchors[a][0] && rpm <= anchors[a + 1][0]) {
+                lo = anchors[a];
+                hi = anchors[a + 1];
+                break;
+            }
+        }
+
+        const range = hi[0] - lo[0];
+        if (range <= 0) {
+            table[i] = lo[1];
+        } else {
+            const t = (rpm - lo[0]) / range;
+            table[i] = lo[1] + t * (hi[1] - lo[1]);
+        }
+    }
+
+    return table;
+}
 
 export class Drivetrain {
     /**
      * @param {object} specs — bus catalog specs from the server
-     * @param {number} specs.engine_torque_nm
-     * @param {number} [specs.engine_hp]
-     * @param {number} [specs.redline_rpm]
-     * @param {number} [specs.peak_torque_rpm_low]
-     * @param {number} [specs.peak_torque_rpm_high]
-     * @param {object} specs.gear_ratios
-     * @param {number} specs.fuel_capacity_liters
-     * @param {number} [specs.current_fuel_liters]
-     * @param {number} [specs.base_weight_kg]
-     * @param {number} [specs.drag_coefficient]
-     * @param {number} [specs.width_m]
-     * @param {number} [specs.height_m]
      */
     constructor(specs) {
         specs = specs || {};
 
-        // ── Per-bus powerband ────────────────────────────────
-        this.peakTorque       = Number(specs.engine_torque_nm)     || 400;
-        this.engineHP         = Number(specs.engine_hp)            || 150;
-        this.redlineRPM       = Number(specs.redline_rpm)          || DEFAULT_REDLINE_RPM;
-        this.peakTorqueRPMLow = Number(specs.peak_torque_rpm_low)  || 1800;
-        this.peakTorqueRPMHigh= Number(specs.peak_torque_rpm_high) || 2500;
+        // ── Per-bus engine parameters ────────────────────────
+        this.peakTorque       = Number(specs.engine_torque_nm)       || 400;
+        this.engineHP         = Number(specs.engine_hp)              || 150;
+        this.idleRPM          = Number(specs.idle_rpm)               || 800;
+        this.redlineRPM       = Number(specs.redline_rpm)            || 3200;
+        this.peakTorqueRPMLow = Number(specs.peak_torque_rpm_low)    || 1800;
+        this.peakTorqueRPMHigh= Number(specs.peak_torque_rpm_high)   || 2500;
+        this.torqueIdleNm     = Number(specs.torque_idle_nm)         || 150;
+        this.torqueRedlineNm  = Number(specs.torque_redline_nm)      || 120;
+
+        // ── Build torque interpolation table ─────────────────
+        this._torqueTable = buildTorqueTable(
+            this.idleRPM, this.redlineRPM,
+            this.torqueIdleNm, this.peakTorque,
+            this.peakTorqueRPMLow, this.peakTorqueRPMHigh,
+            this.torqueRedlineNm,
+        );
 
         // ── Drag model ───────────────────────────────────────
-        // drag_coefficient from specs is Cd (pure). Frontal area ≈ width × height × 0.85
         const busWidth  = Number(specs.width_m)  || 2.0;
         const busHeight = Number(specs.height_m) || 2.6;
         const Cd = Number(specs.drag_coefficient) || 0.70;
         const frontalArea = busWidth * busHeight * 0.35;
-        /** @type {number} Precomputed 0.5 × ρ × Cd × A for drag force calc */
         this.dragFactor = 0.5 * AIR_DENSITY * Cd * frontalArea;
 
         // ── Rolling resistance ────────────────────────────────
         const mass = Number(specs.base_weight_kg) || 3500;
-        /** @type {number} Constant rolling resistance force in N */
         this.rollingResistance = ROLLING_RESISTANCE_COEFF * mass * GRAVITY;
 
-        // Parse gear ratios
+        // ── Gear ratios ──────────────────────────────────────
         const ratios = specs.gear_ratios || {};
         this.forwardGears = Object.entries(ratios)
             .filter(([k]) => k !== 'R')
@@ -92,13 +143,18 @@ export class Drivetrain {
         this.reverseRatio = Number(ratios['R']) || this.forwardGears[0] || 4.0;
 
         this.currentGear = 1;
-        this.rpm = IDLE_RPM;
+        this.rpm = this.idleRPM;
         this.throttle = 0;
         this.braking = false;
 
         // ── Clutch state ─────────────────────────────────────
         /** 0 = fully disengaged, 1 = fully engaged */
         this.clutch = 1.0;
+        /** Shift-triggered clutch timer (0 = no shift in progress) */
+        this._shiftClutchTimer = 0;
+
+        // ── Fuel cut state ───────────────────────────────────
+        this._fuelCut = false;
 
         this.fuelCapacity = specs.fuel_capacity_liters || 100;
         this.fuel = specs.current_fuel_liters ?? this.fuelCapacity;
@@ -123,28 +179,35 @@ export class Drivetrain {
     get hasFuel() { return this.fuel > 0; }
 
     /**
-     * Diesel torque curve — normalised multiplier (0.5–1.0).
-     * Uses per-bus RPM breakpoints.
+     * Lookup torque (Nm) from the interpolated table.
+     * @param {number} rpm
+     * @returns {number} torque in Nm
      */
     torqueCurve(rpm) {
-        if (rpm <= IDLE_RPM) return 0.5;
-        if (rpm >= this.redlineRPM) return 0.5;
-        if (rpm >= this.peakTorqueRPMLow && rpm <= this.peakTorqueRPMHigh) return 1.0;
+        if (rpm <= 0) return 0;
+        if (rpm >= this.redlineRPM) return this.torqueRedlineNm;
 
-        if (rpm < this.peakTorqueRPMLow) {
-            const t = (rpm - IDLE_RPM) / (this.peakTorqueRPMLow - IDLE_RPM);
-            return 0.5 + t * 0.5;
-        }
-        const t = (rpm - this.peakTorqueRPMHigh) / (this.redlineRPM - this.peakTorqueRPMHigh);
-        return 1.0 - t * 0.5;
+        const idx = rpm / TORQUE_TABLE_STEP;
+        const lo = Math.floor(idx);
+        const hi = lo + 1;
+
+        if (hi >= this._torqueTable.length) return this._torqueTable[lo] || 0;
+
+        const t = idx - lo;
+        return this._torqueTable[lo] * (1 - t) + this._torqueTable[hi] * t;
     }
 
+    /**
+     * Rigid RPM computation from wheel speed — direct drive, no slip.
+     * @param {number} wheelSpeed — angular speed in rad/s
+     * @returns {number} engine RPM (clamped to [0, redlineRPM])
+     */
     computeRPM(wheelSpeed) {
         const ratio = Math.abs(this.currentRatio);
-        if (ratio === 0) return IDLE_RPM;
+        if (ratio === 0) return this.idleRPM;
         const engineRadPerSec = wheelSpeed * ratio * FINAL_DRIVE_RATIO;
         const computedRPM = (engineRadPerSec * 60) / (2 * Math.PI);
-        return Math.max(IDLE_RPM, Math.min(this.redlineRPM, computedRPM));
+        return Math.max(0, Math.min(this.redlineRPM, computedRPM));
     }
 
     /**
@@ -167,35 +230,59 @@ export class Drivetrain {
 
     /**
      * Main per-frame update. Returns engine force (N) for rear wheels.
-     * Includes clutch engagement ramp, non-linear throttle, and idle creep.
-     * Drag and rolling resistance are returned separately via computeResistance().
+     *
+     * Direct drive model:
+     *  1. Compute RPM rigidly from wheel speed
+     *  2. Auto-clutch when RPM < idle_rpm
+     *  3. Fuel cut when RPM >= max_rpm
+     *  4. Look up torque from interpolation table
+     *  5. Force = torque × throttle × gear × finalDrive / wheelRadius × clutch
+     *
+     * @param {number} wheelSpeed — rear wheel angular speed (rad/s)
+     * @param {number} throttleInput — 0..1 raw input
+     * @param {boolean} isBraking
+     * @param {number} dt — frame delta in seconds
+     * @returns {number} engine force in Newtons
      */
     update(wheelSpeed, throttleInput, isBraking, dt) {
         // ── Non-linear throttle (cubic) ──────────────────────
-        // Makes low-end throttle more controllable (diesel feel)
         this.throttle = throttleInput * throttleInput * throttleInput;
         this.braking = isBraking;
 
-        // ── Clutch engagement ramp ───────────────────────────
-        // After a gear change clutch starts at 0, ramps to 1 over CLUTCH_ENGAGE_TIME
-        if (this.clutch < 1.0) {
-            this.clutch = Math.min(1.0, this.clutch + dt / CLUTCH_ENGAGE_TIME);
+        // ── Rigid RPM from wheel speed ───────────────────────
+        const rawRPM = this.computeRPM(wheelSpeed);
+
+        // ── Auto-clutch at low RPM ───────────────────────────
+        // When wheel-driven RPM is below idle, disengage clutch
+        // proportionally so the engine stays at idle RPM.
+        let autoClutch = 1.0;
+        if (rawRPM < this.idleRPM && this.currentGear !== 0) {
+            autoClutch = this.idleRPM > 0 ? rawRPM / this.idleRPM : 0;
+            this.rpm = this.idleRPM;
+        } else {
+            this.rpm = rawRPM;
         }
 
-        // ── RPM with inertia ─────────────────────────────────
-        const wheelRPM = this.computeRPM(wheelSpeed);
-        const throttleTargetRPM = IDLE_RPM + this.throttle * (this.redlineRPM - IDLE_RPM) * 0.75;
-        // Clutch slip: when clutch is partly engaged, engine is less coupled to wheels
-        const coupledRPM = IDLE_RPM + (wheelRPM - IDLE_RPM) * this.clutch;
-        const targetRPM = Math.max(coupledRPM, throttleTargetRPM);
-        const alpha = Math.min(1, ENGINE_INERTIA * dt);
-        this.rpm = this.rpm + (targetRPM - this.rpm) * alpha;
-        this.rpm = Math.max(IDLE_RPM, Math.min(this.redlineRPM, this.rpm));
+        // ── Shift clutch ramp ────────────────────────────────
+        // After a gear change, shift clutch ramps 0 → 1
+        if (this._shiftClutchTimer > 0) {
+            this._shiftClutchTimer = Math.max(0, this._shiftClutchTimer - dt);
+            this.clutch = 1.0 - (this._shiftClutchTimer / CLUTCH_ENGAGE_TIME);
+        } else {
+            this.clutch = autoClutch;
+        }
 
         // ── No fuel → engine dies ────────────────────────────
         if (!this.hasFuel) {
             this.rpm = 0;
             return 0;
+        }
+
+        // ── Fuel cut limiter ─────────────────────────────────
+        if (this.rpm >= this.redlineRPM) {
+            this._fuelCut = true;
+        } else if (this._fuelCut && this.rpm < this.redlineRPM - 100) {
+            this._fuelCut = false;
         }
 
         // ── Fuel consumption ─────────────────────────────────
@@ -207,17 +294,22 @@ export class Drivetrain {
         const ratio = this.currentRatio;
         if (ratio === 0) return 0;  // neutral → no force
 
-        // Idle creep: when in gear, no throttle, no brake → gentle forward push
+        // Fuel cut active → no power
+        if (this._fuelCut) return 0;
+
+        // Idle creep: when in gear, no throttle, no brake → gentle forward push.
+        // Creep bypasses auto-clutch — it's the torque converter / idle engagement.
         if (this.throttle === 0) {
             if (!this.braking && this.currentGear !== 0) {
                 const sign = this.currentGear === -1 ? -1 : 1;
-                return sign * IDLE_CREEP_FORCE * this.clutch;
+                return sign * IDLE_CREEP_FORCE;
             }
             return 0;
         }
 
-        const torqueMultiplier = this.torqueCurve(this.rpm);
-        const wheelTorque = this.peakTorque * torqueMultiplier * this.throttle
+        // Torque from interpolated table (actual Nm)
+        const torqueNm = this.torqueCurve(this.rpm);
+        const wheelTorque = torqueNm * this.throttle
             * Math.abs(ratio) * FINAL_DRIVE_RATIO;
         const force = (wheelTorque / WHEEL_RADIUS) * this.clutch;
 
@@ -227,16 +319,23 @@ export class Drivetrain {
     shiftUp() {
         if (this.currentGear < this.gearCount) {
             this.currentGear++;
-            this.clutch = 0;
+            this._shiftClutchTimer = CLUTCH_ENGAGE_TIME;
         }
     }
 
     shiftDown() {
         if (this.currentGear > -1) {
             this.currentGear--;
-            this.clutch = 0;
+            this._shiftClutchTimer = CLUTCH_ENGAGE_TIME;
         }
     }
 }
 
-export { IDLE_RPM, DEFAULT_REDLINE_RPM as REDLINE_RPM, ENGINE_INERTIA, FINAL_DRIVE_RATIO, WHEEL_RADIUS, CLUTCH_ENGAGE_TIME, IDLE_CREEP_FORCE };
+export {
+    FINAL_DRIVE_RATIO,
+    WHEEL_RADIUS,
+    CLUTCH_ENGAGE_TIME,
+    IDLE_CREEP_FORCE,
+    TORQUE_TABLE_STEP,
+    buildTorqueTable,
+};

@@ -87,19 +87,42 @@ export class PhysicsWorld {
      * @private
      */
     _createTrack(mapConfig) {
-        // Ground — thick box with top surface flush at Y = 0.
-        // A Box is preferred over Plane because SAPBroadphase pairs
-        // correctly with finite AABB and the raycast intersection
-        // never returns t < 0 when connection points are near Y = 0.
-        const GROUND_HALF = Math.max(500, mapConfig?.groundSize || 500);
-        const ground = new CANNON.Body({
-            mass: 0,
-            shape: new CANNON.Box(new CANNON.Vec3(GROUND_HALF, 0.5, GROUND_HALF)),
-            material: this.trackMaterial,
-            collisionFilterGroup: COLLISION_GROUND,
-        });
-        ground.position.set(0, -0.5, 0);   // top surface at Y = 0
-        this.world.addBody(ground);
+        // ── Ground geometry ──────────────────────────────────
+        if (mapConfig?.heightData) {
+            // Heightfield terrain — used for maps with elevation.
+            // heightData: 2D array [rows][cols] of Y values.
+            // elementSize: metres per cell (square grid).
+            const data = mapConfig.heightData;
+            const elSize = mapConfig.heightElementSize || 10;
+            const shape = new CANNON.Heightfield(data, { elementSize: elSize });
+            const ground = new CANNON.Body({
+                mass: 0,
+                shape,
+                material: this.trackMaterial,
+                collisionFilterGroup: COLLISION_GROUND,
+            });
+            // Heightfield origin is at its corner; centre it.
+            const rows = data.length;
+            const cols = data[0].length;
+            ground.position.set(
+                -(cols * elSize) / 2,
+                0,
+                -(rows * elSize) / 2,
+            );
+            ground.quaternion.setFromEuler(-Math.PI / 2, 0, 0);
+            this.world.addBody(ground);
+        } else {
+            // Flat box ground — top surface flush at Y = 0.
+            const GROUND_HALF = Math.max(500, mapConfig?.groundSize || 500);
+            const ground = new CANNON.Body({
+                mass: 0,
+                shape: new CANNON.Box(new CANNON.Vec3(GROUND_HALF, 0.5, GROUND_HALF)),
+                material: this.trackMaterial,
+                collisionFilterGroup: COLLISION_GROUND,
+            });
+            ground.position.set(0, -0.5, 0);
+            this.world.addBody(ground);
+        }
 
         if (!mapConfig) return;
 

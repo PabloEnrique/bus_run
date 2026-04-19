@@ -37,8 +37,11 @@ class BusCatalogSeeder extends Seeder
                         'axle_track_m' => $gen['axle_track_m'] ?? 1.60,
                         'engine_hp' => $gen['engine_hp'] ?? 150,
                         'redline_rpm' => $gen['redline_rpm'] ?? 3200,
+                        'idle_rpm' => $gen['idle_rpm'] ?? 800,
                         'peak_torque_rpm_low' => $gen['peak_torque_rpm_low'] ?? 1800,
                         'peak_torque_rpm_high' => $gen['peak_torque_rpm_high'] ?? 2500,
+                        'torque_idle_nm' => $gen['torque_idle_nm'] ?? 150,
+                        'torque_redline_nm' => $gen['torque_redline_nm'] ?? 120,
                         'drag_coefficient' => $gen['drag_coefficient'] ?? 0.70,
                     ]
                 );

@@ -1,208 +1,194 @@
-# Physics Engine — Architecture & Logic
+# Physics Engine — Technical Documentation
 
-> Internal reference for future sprints. Documents how the Cannon-es physics,
-> drivetrain simulation, and RaycastVehicle interact.
+> Internal reference. Documents how the drivetrain simulation, torque curve
+> processing, and cannon-es physics interact.
 
 ## Module Map
 
 ```
 resources/js/GameEngine/
-├── PhysicsWorld.js   — Cannon-es world, track, materials, RaycastVehicle
-├── Drivetrain.js     — Engine RPM (with inertia), torque curve, gears, fuel
-├── SceneManager.js   — Three.js rendering, camera, track visuals
-└── NetworkManager.js — Colyseus.js client for multiplayer sync
+├── PhysicsWorld.js   — Cannon-es world, ground (Box/Heightfield), materials, RaycastVehicle
+├── Drivetrain.js     — Direct-drive RPM, 5-point torque table, gears, fuel cut, auto-clutch
+├── SceneManager.js   — Three.js rendering, camera, terrain, track visuals
+├── AudioManager.js   — Synthetic diesel audio (sawtooth + lowpass)
+├── NetworkManager.js — Colyseus.js client for multiplayer sync
+└── maps/
+    ├── index.js              — Map registry
+    ├── city.js               — 200×200 m city grid
+    ├── highway.js            — 800 m dual carriageway
+    ├── circuit.js            — ~5 km oval racing circuit
+    ├── flat-city.js          — ~1500 m large urban grid (100 blocks)
+    └── mountain-highway.js   — 5.6 km highway with heightfield elevation
 ```
 
-## PhysicsWorld.js — Cannon-es
+---
+
+## 1. Torque Curve Processing
+
+### 5-Point Anchor Interpolation
+
+Each bus defines 5 anchor points that shape its engine torque curve:
+
+| # | RPM Source | Torque Source |
+|---|-----------|---------------|
+| 1 | `0` | `0 Nm` |
+| 2 | `idle_rpm` | `torque_idle_nm` |
+| 3 | `peak_torque_rpm_low` | `engine_torque_nm` (peak) |
+| 4 | `peak_torque_rpm_high` | `engine_torque_nm` (peak) |
+| 5 | `redline_rpm` | `torque_redline_nm` |
+
+At construction time, `buildTorqueTable()` generates a `Float64Array` with one
+entry every **50 RPM** from 0 to redline. Values between anchors are linearly
+interpolated.
+
+```
+Torque (Nm)
+  ^
+  |     ┌──────────┐  ← peak plateau (engine_torque_nm)
+  |    /            \
+  |   /              \
+  |  /                \──── torque_redline_nm
+  | / ← torque_idle_nm
+  |/
+  └────────────────────────→ RPM
+  0  idle  peak_start  peak_end  redline
+```
+
+### Runtime Lookup
+
+`torqueCurve(rpm)` performs sub-index interpolation on the precomputed table,
+returning **actual Nm** (not a normalized 0–1 multiplier):
+
+```javascript
+const idx = rpm / 50;
+const lo  = Math.floor(idx);
+const t   = idx - lo;
+return table[lo] * (1 - t) + table[lo + 1] * t;
+```
+
+---
+
+## 2. Direct Drive Model
+
+RPM is **rigidly coupled** to wheel rotation — no slip, no inertia blending:
+
+```
+RPM = (ω_wheel × R_gear × R_final × 60) / (2π)
+```
+
+- `ω_wheel` = rear wheel angular speed (rad/s) from cannon-es `deltaRotation`
+- `R_gear`  = current gear ratio (e.g., 5.18 in 1st)
+- `R_final` = final drive ratio (2.8)
+
+### Automatic Clutch
+
+When computed RPM < `idle_rpm`, the clutch disengages proportionally:
+
+```
+clutch = computedRPM / idle_rpm
+```
+
+The engine holds at idle RPM. This prevents stalling while keeping the
+simulation physically grounded.
+
+**Idle creep** (350 N) bypasses the clutch — it simulates torque converter
+engagement at standstill.
+
+### Gear Shift Clutch
+
+On shift, a separate timer ramps clutch from 0 → 1 over `CLUTCH_ENGAGE_TIME`
+(0.8s). During this ramp, engine force is proportionally reduced.
+
+---
+
+## 3. Engine Force
+
+```
+F_engine = T(rpm) × θ³ × R_gear × R_final / r_wheel × C_clutch
+```
+
+Where:
+- `T(rpm)` = torque from interpolated table (Nm)
+- `θ³`     = cubic throttle input (diesel-feel low-end control)
+- `r_wheel`= 0.35 m (tyre rolling radius)
+- `C_clutch`= clutch engagement factor (0–1)
+
+---
+
+## 4. Fuel Cut Limiter
+
+When RPM reaches `redline_rpm`, engine force drops to **0 N** (fuel injection cut).
+Power resumes when RPM falls below `redline_rpm - 100`. This creates the
+characteristic limiter bounce at high RPM.
+
+---
+
+## 5. Aerodynamic Drag & Rolling Resistance
+
+```
+F_drag = 0.5 × ρ × Cd × A × v²
+F_roll = Crr × m × g
+```
+
+- `ρ = 1.225` kg/m³, `Crr = 0.008`, `A = width × height × 0.35`
+- Drag is applied as a **post-step velocity reduction** to avoid sub-step
+  accumulation issues in cannon-es.
+
+---
+
+## 6. Per-Bus Specs Table
+
+| Bus | Peak Torque | Idle / Redline | Power Band | Redline |
+|-----|------------|----------------|------------|---------|
+| Rosa 2nd Gen (BE4) | 290 Nm | 180 / 150 Nm | 1600–2000 | 3200 |
+| Rosa 3rd Gen (BE6) | 420 Nm | 250 / 200 Nm | 1500–2200 | 3200 |
+| Rosa 4th Gen (BE7) | 530 Nm | 300 / 250 Nm | 1400–2200 | 3200 |
+| Coaster 2nd Gen (B20) | 240 Nm | 150 / 120 Nm | 1800–2200 | 3400 |
+| Coaster 3rd Gen (B40/50) | 390 Nm | 220 / 180 Nm | 1600–2000 | 3200 |
+| Coaster 4th Gen (B60/70) | 450 Nm | 260 / 200 Nm | 1400–1800 | 3000 |
+| Volare A-Series | 430 Nm | 230 / 190 Nm | 1500–1900 | 3000 |
+| Volare W-Series | 600 Nm | 350 / 280 Nm | 1300–1700 | 2800 |
+| Volare Fly/V-Series | 700 Nm | 400 / 320 Nm | 1200–1600 | 2800 |
+
+---
+
+## 7. Physics World
+
+- **Ground**: `CANNON.Box` (flat maps) or `CANNON.Heightfield` (elevation maps)
+- **Broadphase**: `SAPBroadphase`
+- **Vehicle**: `CANNON.RaycastVehicle` with 4 wheels
+- **Collision groups**: GROUND (1), WALL (2), VEHICLE (4)
+- **Hard floor guarantee**: Post-step check keeps wheel connection points above ground
+- **Sub-steps**: 5 per frame (fixed 1/60s timestep)
 
 ### Materials & Contact Pairs
 
-Three materials govern surface interactions:
-
-| Material         | Used on                  | Purpose                          |
-|------------------|--------------------------|----------------------------------|
-| `trackMaterial`  | Ground segments, infield | Asphalt surface                  |
-| `tireMaterial`   | (reserved for wheels)    | Tyre contact (raycast wheels use `frictionSlip`) |
-| `chassisMaterial`| Chassis body             | Near-zero ground friction — prevents scraping block |
-| `wallMaterial`   | Inner + outer barriers   | Wall barriers                    |
-
-Contact material pairs:
-
-| A                | B                | Friction | Restitution | Notes                        |
-|------------------|------------------|----------|-------------|------------------------------|
-| `trackMaterial`  | `tireMaterial`   | 0.6      | 0.05        | Good traction, minimal bounce|
-| `tireMaterial`   | `wallMaterial`   | 0.2      | 0.3         | Slippery bounce off walls    |
-| `chassisMaterial`| `trackMaterial`  | 0.01     | 0.0         | Chassis scrape doesn't block |
-| `chassisMaterial`| `wallMaterial`   | 0.1      | 0.3         | Chassis-wall bounce          |
-
-**Bug fixed (Sprint 8):** Duplicate `ContactMaterial(tireMaterial, wallMaterial)` removed.
-
-**Bug fixed (Sprint 8.2):** Chassis was using `tireMaterial` (friction 0.6 vs ground),
-so when the chassis bottomed out it created ~20 kN of friction blocking all movement.
-Now uses `chassisMaterial` (friction 0.01 vs ground).
-
-### RaycastVehicle
-
-- **Chassis:** `CANNON.Box(1.0, 0.5, 2.0)` — half-extents in metres
-- **Mass:** from `busSpecs.base_weight_kg` (typically 3500–5500 kg)
-- **Angular damping:** 0.4 — prevents unrealistic spinning
-- **Linear damping:** 0.05 — subtle rolling resistance
-- **Axis configuration:** Right = X (0), Up = Y (1), Forward = Z (2)
-- **Spawn position:** South straight center, Y = 2.0 (drops onto springs)
-
-### Suspension Geometry (Sprint 8.2 fix)
-
-**Problem:** Suspension stiffness was `spec × 100 ≈ 70 N/m` — 500× too weak to hold
-a 3500 kg bus. Connection point Y = 0 (chassis center) instead of below bottom.
-Result: chassis free-fell onto ground, all weight on box collision, zero wheel normal
-force, engine force through frictionSlip ≈ 0.
-
-**Fix:** Stiffness = `mass × 16` (≈ 56,000 N/m for 3500 kg, targeting 0.15 m static sag).
-Connection point Y = -0.65 (below chassis bottom at -0.5).
-
-| Parameter               | Before | After | Unit  |
-|--------------------------|--------|-------|-------|
-| `suspensionStiffness`    | 70     | 56000 | N/m   |
-| `suspensionRestLength`   | 0.3    | 0.6   | m     |
-| `maxSuspensionTravel`    | 0.3    | 0.5   | m     |
-| `dampingRelaxation`      | 3.0    | 5.0   | —     |
-| `dampingCompression`     | 4.0    | 4.5   | —     |
-| `maxSuspensionForce`     | mass×15| mass×20| N    |
-| Connection point Y       | 0      | -0.65 | m     |
-| Chassis material         | tire   | chassis| —    |
-| Spawn Y                  | 1.5    | 2.0   | m     |
-
-### Wheel Configuration
-
-| Wheels | frictionSlip | Effect                            |
-|--------|-------------|-----------------------------------|
-| Front  | 1.8         | Break traction sooner → **understeer** |
-| Rear   | 3.0         | Hold traction → stable rear axle  |
-
-This split ensures the front axle loses grip before the rear at high speeds,
-producing natural understeer appropriate for a heavy bus.
-
-### Track Layout
-
-Rectangular loop: 160×100 m outer, 120×60 m inner, 20 m lane width.
-
-```
-  ┌──────── N straight (160 m) ────────┐
-  │  ┌──────────────────────────────┐  │
-  W  │        Infield (grass)       │  E
-  │  └──────────────────────────────┘  │
-  └──────── S straight (160 m) ────────┘
-
-  Spawn: South straight center (0, 1.5, -40)
-  Track width: 20 m
-  Wall height: 2 m, thickness: 0.5 m
-```
-
-Ground: thin `CANNON.Box` slabs (half-thickness 0.1 m) at y = -0.1.
-Fallback plane at y = -2 catches any vehicle that falls off-track.
+| A | B | Friction | Restitution |
+|---|---|----------|-------------|
+| track | tire | 0.6 | 0.05 |
+| tire | wall | 0.2 | 0.3 |
+| chassis | track | 0.01 | 0.0 |
+| chassis | wall | 0.1 | 0.3 |
 
 ---
 
-## Drivetrain.js — Engine Simulation
+## 8. Maps
 
-### Constants
-
-| Constant             | Value   | Unit   | Description                          |
-|----------------------|---------|--------|--------------------------------------|
-| `IDLE_RPM`           | 800     | RPM    | Engine idle speed                    |
-| `REDLINE_RPM`        | 3200    | RPM    | Rev limiter                          |
-| `PEAK_TORQUE_RPM_LOW`| 1800   | RPM    | Start of peak torque plateau         |
-| `PEAK_TORQUE_RPM_HIGH`| 2500  | RPM    | End of peak torque plateau           |
-| `FINAL_DRIVE_RATIO`  | 4.1     | —      | Differential ratio                   |
-| `WHEEL_RADIUS`       | 0.35    | m      | Tyre rolling radius                  |
-| `ENGINE_INERTIA`     | 5.0     | s⁻¹    | RPM smoothing rate                   |
-| `FUEL_RATE_BASE`     | 0.00008 | L/s/lu | Base fuel burn per load unit         |
-
-### Diesel Torque Curve
-
-Normalised multiplier (0.3 – 1.0) applied to `peakTorque`:
-
-```
- 1.0 ┤         ┌────────┐
-     │        /          \
- 0.4 ├───────/            \
- 0.3 ├                     ──── (redline)
-     └──┬───┬──┬────────┬──┬──
-       800 1800       2500 3200  RPM
-```
-
-- **Idle (≤ 800):** 0.4
-- **Ramp (800–1800):** linear 0.4 → 1.0
-- **Peak plateau (1800–2500):** 1.0
-- **Taper (2500–3200):** linear 1.0 → 0.3
-- **Redline (≥ 3200):** 0.3
-
-### RPM Inertia Model (Sprint 8 fix)
-
-**Problem:** RPM was computed directly from wheel angular speed. At standstill
-(`wheelSpeed = 0`), RPM was always `IDLE_RPM = 800`, producing only 40% of peak
-torque. The bus could never generate strong launch force.
-
-**Solution:** RPM now lerps toward a target that accounts for throttle input:
-
-```
-wheelRPM        = computeRPM(wheelSpeed)
-throttleTarget  = IDLE_RPM + throttle × (REDLINE_RPM − IDLE_RPM) × 0.75
-targetRPM       = max(wheelRPM, throttleTarget)
-rpm            += (targetRPM − rpm) × min(1, ENGINE_INERTIA × dt)
-```
-
-- At standstill with full throttle: `throttleTarget ≈ 2600 RPM` → engine revs up
-  producing ~85% torque at peak
-- As bus accelerates: `wheelRPM` rises and eventually dominates the max()
-- When throttle is released: `throttleTarget = IDLE`, RPM decays smoothly toward idle
-- `ENGINE_INERTIA = 5.0` → RPM reaches 95% of target in ≈ 0.6 seconds
-
-### Force Formula
-
-```
-torqueMultiplier = torqueCurve(rpm)              // 0.3–1.0
-wheelTorque      = peakTorque × multiplier × throttle × |gearRatio| × finalDrive
-engineForce      = wheelTorque / wheelRadius     // Newtons
-```
-
-Applied to rear wheels (indices 2, 3) via `vehicle.applyEngineForce()`.
-
-### Fuel Consumption
-
-```
-load        = (rpm / REDLINE_RPM) × throttle     // 0..1
-consumption = FUEL_RATE_BASE × load × peakTorque × dt
-```
-
-Higher RPM + more throttle = more fuel burned. Engine dies when `fuel ≤ 0`.
+| Map | Size | Type | Features |
+|-----|------|------|----------|
+| Ciudad | 200×200 m | Flat | City grid, 16 buildings, intersections |
+| Autopista | 800 m | Flat | Dual carriageway, median, guardrails |
+| Circuito Oval | ~5 km | Flat | Oval track, grandstands, pit lane |
+| Metrópoli | ~1500×1500 m | Flat | 100 city blocks, 80+ buildings |
+| Autopista de Montaña | 5.6 km | Heightfield | Sinusoidal hills ±15m, guardrails on terrain |
 
 ---
 
-## Steering Model (Track.vue)
+## 9. Testing
 
-Speed-dependent maximum steering angle:
+Tests in `tests/js/`, run via `npx vitest run`.
 
-```
-maxSteer = 0.4 × (1 − min(speed_kmh / 100, 0.65))
-```
-
-| Speed (km/h) | maxSteer (rad) |
-|---------------|----------------|
-| 0             | 0.40           |
-| 50            | 0.20           |
-| 80            | 0.14           |
-| 100+          | 0.14           |
-
-Prevents unrealistic snap-turns at highway speed for a heavy bus.
-
----
-
-## Testing
-
-Tests live in `tests/js/` and run via Vitest (`npm run test`).
-
-| File                   | Tests | Covers                                    |
-|------------------------|-------|-------------------------------------------|
-| `drivetrain.test.js`   | 23    | Constructor, torqueCurve, update() force, RPM inertia, gears, fuel |
-| `physics-math.test.js` | 10    | computeRPM, force calculation, gear parsing edge cases |
+| File | Tests | Covers |
+|------|-------|--------|
+| `physics-math.test.js` | 27 | Torque table interpolation, Nm lookup, rigid RPM, force calc, drag, per-bus powerband |
+| `drivetrain.test.js` | 30 | Constructor, direct drive RPM, auto-clutch, fuel cut, shifts, idle creep, throttle, fuel |

@@ -73,22 +73,35 @@ export class SceneManager {
         const lineMat  = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.8 });
         const wallMat  = new THREE.MeshStandardMaterial({ color: 0x888888, roughness: 0.7 });
 
-        // ── Ground plane ─────────────────────────────────────
-        const roadGeo = new THREE.PlaneGeometry(groundSize, groundSize);
-        const road = new THREE.Mesh(roadGeo, asphalt);
-        road.rotation.x = -Math.PI / 2;
-        road.position.y = 0;
-        road.receiveShadow = true;
-        this.scene.add(road);
+        // ── Dynamic camera/shadow bounds for large maps ──────
+        if (groundSize > 500) {
+            this.camera.far = Math.max(2000, groundSize * 2);
+            this.camera.updateProjectionMatrix();
+            if (this.scene.fog) {
+                this.scene.fog.near = groundSize * 0.3;
+                this.scene.fog.far  = groundSize * 1.5;
+            }
+        }
 
-        // ── Grass beyond the asphalt ─────────────────────────
-        const grassSize = groundSize * 3;
-        const grassGeo = new THREE.PlaneGeometry(grassSize, grassSize);
-        const grass = new THREE.Mesh(grassGeo, grassMat);
-        grass.rotation.x = -Math.PI / 2;
-        grass.position.y = -0.01;
-        grass.receiveShadow = true;
-        this.scene.add(grass);
+        // ── Ground — flat or heightfield terrain ─────────────
+        if (mapConfig?.heightData) {
+            this._buildTerrain(mapConfig, asphalt, grassMat);
+        } else {
+            const roadGeo = new THREE.PlaneGeometry(groundSize, groundSize);
+            const road = new THREE.Mesh(roadGeo, asphalt);
+            road.rotation.x = -Math.PI / 2;
+            road.position.y = 0;
+            road.receiveShadow = true;
+            this.scene.add(road);
+
+            const grassSize = groundSize * 3;
+            const grassGeo = new THREE.PlaneGeometry(grassSize, grassSize);
+            const grass = new THREE.Mesh(grassGeo, grassMat);
+            grass.rotation.x = -Math.PI / 2;
+            grass.position.y = -0.01;
+            grass.receiveShadow = true;
+            this.scene.add(grass);
+        }
 
         if (!mapConfig) {
             // Fallback: simple dashed center line (legacy behaviour)
@@ -190,6 +203,47 @@ export class SceneManager {
                 this.scene.add(mesh);
             }
         }
+    }
+
+    /**
+     * Build terrain mesh from heightData (2D elevation array).
+     * Displaces a PlaneGeometry's vertices to match the elevation grid.
+     * @param {object} mapConfig
+     * @param {THREE.Material} roadMat
+     * @param {THREE.Material} grassMat
+     * @private
+     */
+    _buildTerrain(mapConfig, roadMat, grassMat) {
+        const data = mapConfig.heightData;
+        const elSize = mapConfig.heightElementSize || 10;
+        const rows = data.length;
+        const cols = data[0].length;
+        const totalW = cols * elSize;
+        const totalD = rows * elSize;
+
+        const geo = new THREE.PlaneGeometry(totalW, totalD, cols - 1, rows - 1);
+        geo.rotateX(-Math.PI / 2);
+
+        const pos = geo.attributes.position;
+        for (let r = 0; r < rows; r++) {
+            for (let c = 0; c < cols; c++) {
+                const idx = r * cols + c;
+                pos.setY(idx, data[r][c]);
+            }
+        }
+        geo.computeVertexNormals();
+
+        const terrain = new THREE.Mesh(geo, roadMat);
+        terrain.receiveShadow = true;
+        this.scene.add(terrain);
+
+        // Grass skirt below the terrain
+        const grassGeo = new THREE.PlaneGeometry(totalW * 3, totalD * 3);
+        const grass = new THREE.Mesh(grassGeo, grassMat);
+        grass.rotation.x = -Math.PI / 2;
+        grass.position.y = -1;
+        grass.receiveShadow = true;
+        this.scene.add(grass);
     }
 
     /**

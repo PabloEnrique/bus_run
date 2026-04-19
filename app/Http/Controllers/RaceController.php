@@ -33,6 +33,9 @@ class RaceController extends Controller
         $maps = [
             ['id' => 'city',    'name' => 'Ciudad',    'description' => 'Calles urbanas con edificios y cruces. Ideal para practicar maniobras.'],
             ['id' => 'highway', 'name' => 'Autopista', 'description' => 'Carretera larga y recta con carriles delimitados. Velocidad máxima.'],
+            ['id' => 'circuit', 'name' => 'Circuito Oval', 'description' => 'Circuito de carreras oval de ~5 km. Velocidad pura y frenada en curvas.'],
+            ['id' => 'flat-city', 'name' => 'Metrópoli', 'description' => 'Ciudad extensa con más de 100 manzanas. Explora a gran escala.'],
+            ['id' => 'mountain-highway', 'name' => 'Autopista de Montaña', 'description' => 'Autopista de 5.6 km con subidas y bajadas pronunciadas.'],
         ];
 
         return Inertia::render('Race/Lobby', [
@@ -48,7 +51,7 @@ class RaceController extends Controller
     {
         $request->validate([
             'bus' => ['required', 'integer'],
-            'map' => ['required', 'string', 'in:city,highway'],
+            'map' => ['required', 'string', 'in:city,highway,circuit,flat-city,mountain-highway'],
         ]);
 
         $bus = $request->user()
@@ -62,9 +65,12 @@ class RaceController extends Controller
             'base_weight_kg'       => $bus->base_weight_kg,
             'engine_torque_nm'     => $bus->engine_torque_nm,
             'engine_hp'            => $bus->engine_hp,
+            'idle_rpm'             => $bus->idle_rpm,
             'redline_rpm'          => $bus->redline_rpm,
             'peak_torque_rpm_low'  => $bus->peak_torque_rpm_low,
             'peak_torque_rpm_high' => $bus->peak_torque_rpm_high,
+            'torque_idle_nm'       => $bus->torque_idle_nm,
+            'torque_redline_nm'    => $bus->torque_redline_nm,
             'fuel_capacity_liters' => $bus->fuel_capacity_liters,
             'current_fuel_liters'  => $bus->pivot->current_fuel_liters,
             'suspension_stiffness' => $bus->suspension_stiffness,

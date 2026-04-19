@@ -7,6 +7,7 @@ import { NetworkManager } from '../../GameEngine/NetworkManager.js';
 import { Drivetrain } from '../../GameEngine/Drivetrain.js';
 import { AudioManager } from '../../GameEngine/AudioManager.js';
 import { getMapById, DEFAULT_MAP_ID } from '../../GameEngine/maps/index.js';
+import GaugeCluster from '../../Components/GaugeCluster.vue';
 
 const props = defineProps({
     bus: Object,
@@ -83,9 +84,12 @@ async function initGame() {
         drivetrain = new Drivetrain({
             engine_torque_nm: props.bus.engine_torque_nm,
             engine_hp: props.bus.engine_hp,
+            idle_rpm: props.bus.idle_rpm,
             redline_rpm: props.bus.redline_rpm,
             peak_torque_rpm_low: props.bus.peak_torque_rpm_low,
             peak_torque_rpm_high: props.bus.peak_torque_rpm_high,
+            torque_idle_nm: props.bus.torque_idle_nm,
+            torque_redline_nm: props.bus.torque_redline_nm,
             gear_ratios: props.bus.gear_ratios,
             fuel_capacity_liters: props.bus.fuel_capacity_liters,
             current_fuel_liters: props.bus.current_fuel_liters,
@@ -304,28 +308,11 @@ function gameLoop() {
     scene.render();
 }
 
-// RPM bar width for HUD (0–100%) — uses per-bus redline
+// HUD computed
 const busRedline = computed(() => props.bus?.redline_rpm || 3200);
 const currentMapName = computed(() => {
     const mc = getMapById(props.mapId || DEFAULT_MAP_ID);
     return mc?.name || 'Pista Libre';
-});
-const rpmPercent = computed(() => Math.min(100, (currentRPM.value / busRedline.value) * 100));
-const rpmColor = computed(() => {
-    const warnThreshold = busRedline.value * 0.875;  // ~87.5%
-    const dangerThreshold = busRedline.value * 0.9375; // ~93.75%
-    if (currentRPM.value > dangerThreshold) return 'bg-red-500';
-    if (currentRPM.value > warnThreshold) return 'bg-amber-500';
-    return 'bg-green-500';
-});
-const fuelPercent = computed(() => {
-    if (fuelCapacity.value === 0) return 0;
-    return Math.round((currentFuel.value / fuelCapacity.value) * 100);
-});
-const fuelBarColor = computed(() => {
-    if (fuelPercent.value > 50) return 'bg-green-500';
-    if (fuelPercent.value > 20) return 'bg-amber-500';
-    return 'bg-red-500';
 });
 
 onMounted(() => {
@@ -395,58 +382,17 @@ onBeforeUnmount(() => {
                 </div>
             </div>
 
-            <!-- Telemetry panel — bottom center -->
+            <!-- Gauge cluster — bottom center -->
             <div class="absolute bottom-4 left-1/2 -translate-x-1/2">
-                <div class="flex items-end gap-4 rounded-xl bg-black/70 px-6 py-4 backdrop-blur">
-                    <!-- Speedometer -->
-                    <div class="text-center">
-                        <p class="text-5xl font-bold tabular-nums text-white">{{ currentSpeed }}</p>
-                        <p class="text-[10px] uppercase tracking-widest text-gray-500">km/h</p>
-                    </div>
-
-                    <!-- Divider -->
-                    <div class="h-16 w-px bg-gray-700"></div>
-
-                    <!-- RPM + Gear -->
-                    <div class="w-40">
-                        <!-- RPM number -->
-                        <div class="mb-1 flex items-baseline justify-between">
-                            <span class="text-xs text-gray-500">RPM</span>
-                            <span class="font-mono text-sm tabular-nums text-gray-300">{{ currentRPM }}</span>
-                        </div>
-                        <!-- RPM bar -->
-                        <div class="h-3 w-full overflow-hidden rounded-full bg-gray-800">
-                            <div
-                                class="h-full rounded-full transition-all duration-75"
-                                :class="rpmColor"
-                                :style="{ width: rpmPercent + '%' }"
-                            ></div>
-                        </div>
-                        <!-- Gear indicator -->
-                        <div class="mt-2 text-center">
-                            <span class="text-3xl font-bold text-amber-400">{{ currentGear }}</span>
-                            <span class="ml-1 text-xs text-gray-600">marcha</span>
-                        </div>
-                    </div>
-
-                    <!-- Divider -->
-                    <div class="h-16 w-px bg-gray-700"></div>
-
-                    <!-- Fuel -->
-                    <div class="w-28">
-                        <div class="mb-1 flex items-baseline justify-between">
-                            <span class="text-xs text-gray-500">⛽ Fuel</span>
-                            <span class="font-mono text-xs tabular-nums text-gray-400">{{ currentFuel }} L</span>
-                        </div>
-                        <div class="h-3 w-full overflow-hidden rounded-full bg-gray-800">
-                            <div
-                                class="h-full rounded-full transition-all duration-300"
-                                :class="fuelBarColor"
-                                :style="{ width: fuelPercent + '%' }"
-                            ></div>
-                        </div>
-                        <p class="mt-1 text-center text-[10px] text-gray-600">{{ fuelPercent }}%</p>
-                    </div>
+                <div class="rounded-xl bg-black/70 px-4 py-3 backdrop-blur">
+                    <GaugeCluster
+                        :rpm="currentRPM"
+                        :max-rpm="busRedline"
+                        :speed="currentSpeed"
+                        :gear="currentGear"
+                        :fuel="currentFuel"
+                        :fuel-capacity="fuelCapacity"
+                    />
                 </div>
             </div>
 
