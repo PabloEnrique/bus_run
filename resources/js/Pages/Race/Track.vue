@@ -43,6 +43,7 @@ let _mapConfig = null;
 // Input state
 const keys = { w: false, a: false, s: false, d: false };
 let shiftCooldown = 0;
+let currentSteer = 0;  // current steering angle (lerped)
 
 function onKeyDown(e) {
     const k = e.key.toLowerCase();
@@ -183,13 +184,26 @@ function gameLoop() {
     const isBraking = keys.s;
     const engineForce = drivetrain.update(wheelSpeed, throttleInput, isBraking, dt);
 
-    // Steering — reduces at high speed for realistic understeer
+    // Velocity / speed (used by steering + telemetry + drag)
     const vel = physics.chassisBody.velocity;
     const speed = Math.sqrt(vel.x * vel.x + vel.z * vel.z) * 3.6; // km/h
-    const maxSteer = 0.4 * (1 - Math.min(speed / 100, 0.65));
-    let steering = 0;
-    if (keys.a) steering = maxSteer;
-    if (keys.d) steering = -maxSteer;
+
+    // ── Gradual steering ───────────────────────────────────
+    // Max steer angle is inversely proportional to wheelbase (longer
+    // buses turn wider) and reduces at speed for realistic understeer.
+    const wheelbase = props.bus?.wheelbase_m || 3.5;
+    const baseMaxSteer = Math.min(0.30, 1.0 / wheelbase);  // ~0.26–0.29 rad
+    const speedFactor = 1 - Math.min(speed / 120, 0.6);
+    const maxSteer = baseMaxSteer * speedFactor;
+
+    // Target: full lock when key held, zero when released (self-centering)
+    let targetSteer = 0;
+    if (keys.a) targetSteer = maxSteer;
+    if (keys.d) targetSteer = -maxSteer;
+
+    // Lerp rate: steer-in is fast, self-centering is faster for realism
+    const steerRate = targetSteer !== 0 ? 4.0 : 8.0;
+    currentSteer += (targetSteer - currentSteer) * Math.min(1, steerRate * dt);
 
     // Apply to rear wheels (indices 2, 3).
     // Negate: cannon-es wheel forward = contactNormal × axleLocal;
@@ -199,8 +213,8 @@ function gameLoop() {
     physics.vehicle.applyEngineForce(-engineForce, 3);
 
     // Steering on front wheels (indices 0, 1)
-    physics.vehicle.setSteeringValue(steering, 0);
-    physics.vehicle.setSteeringValue(steering, 1);
+    physics.vehicle.setSteeringValue(currentSteer, 0);
+    physics.vehicle.setSteeringValue(currentSteer, 1);
 
     // Manual brake (S key)
     const manualBrake = keys.s ? 80 : 0;
@@ -250,6 +264,7 @@ function gameLoop() {
         physics.chassisBody.velocity.set(0, 0, 0);
         physics.chassisBody.angularVelocity.set(0, 0, 0);
         physics.chassisBody.quaternion.set(0, 0, 0, 1);
+        currentSteer = 0;
     }
 
     // Update telemetry
