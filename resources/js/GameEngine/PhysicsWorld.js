@@ -197,6 +197,35 @@ export class PhysicsWorld {
     step(dt) {
         this.world.step(1 / 60, dt, 3);
 
+        // ── Hard floor guarantee ─────────────────────────────
+        // If the chassis sinks so low that any wheel connection point goes
+        // below the ground plane (Y = 0), raycasts miss the surface →
+        // springs produce zero force → bus loses traction and gets stuck.
+        // After each step we check all 4 connection points in world space
+        // and push the chassis up by the worst deficit.
+        if (this.vehicle && this.chassisBody) {
+            let worstDeficit = 0;
+            const pos  = this.chassisBody.position;
+            const quat = this.chassisBody.quaternion;
+            const tmp  = new CANNON.Vec3();
+
+            for (const info of this.vehicle.wheelInfos) {
+                quat.vmult(info.chassisConnectionPointLocal, tmp);
+                const worldY = pos.y + tmp.y;
+                // Keep at least 1 cm above the surface so the ray has room
+                const deficit = 0.01 - worldY;
+                if (deficit > worstDeficit) worstDeficit = deficit;
+            }
+
+            if (worstDeficit > 0) {
+                this.chassisBody.position.y += worstDeficit;
+                // Kill downward velocity so it doesn't immediately sink again
+                if (this.chassisBody.velocity.y < 0) {
+                    this.chassisBody.velocity.y = 0;
+                }
+            }
+        }
+
         // Sync wheel bodies to raycast results
         if (this.vehicle) {
             this.vehicle.wheelInfos.forEach((wheel, i) => {
@@ -204,6 +233,10 @@ export class PhysicsWorld {
                 const t = wheel.worldTransform;
                 this.wheelBodies[i].position.copy(t.position);
                 this.wheelBodies[i].quaternion.copy(t.quaternion);
+                // Visual clamp: wheel centre never below its own radius
+                if (this.wheelBodies[i].position.y < wheel.radius) {
+                    this.wheelBodies[i].position.y = wheel.radius;
+                }
             });
         }
     }
