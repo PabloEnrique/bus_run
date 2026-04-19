@@ -87,15 +87,18 @@ export class PhysicsWorld {
      * @private
      */
     _createTrack(mapConfig) {
-        // Ground plane at Y = 0 (all maps share the same flat ground)
+        // Ground — thick box with top surface flush at Y = 0.
+        // A Box is preferred over Plane because SAPBroadphase pairs
+        // correctly with finite AABB and the raycast intersection
+        // never returns t < 0 when connection points are near Y = 0.
+        const GROUND_HALF = Math.max(500, mapConfig?.groundSize || 500);
         const ground = new CANNON.Body({
             mass: 0,
-            shape: new CANNON.Plane(),
+            shape: new CANNON.Box(new CANNON.Vec3(GROUND_HALF, 0.5, GROUND_HALF)),
             material: this.trackMaterial,
             collisionFilterGroup: COLLISION_GROUND,
         });
-        ground.quaternion.setFromEuler(-Math.PI / 2, 0, 0);
-        ground.position.set(0, 0, 0);
+        ground.position.set(0, -0.5, 0);   // top surface at Y = 0
         this.world.addBody(ground);
 
         if (!mapConfig) return;
@@ -191,6 +194,7 @@ export class PhysicsWorld {
 
         // Wheel radius scales slightly with bus size
         const wheelRadius = 0.30 + (height - 2.5) * 0.1;  // ~0.31–0.35
+        this._wheelRadius = wheelRadius; // used by hard-floor guarantee in step()
         const connectionY = -halfH;
 
         // Wheel connection points derived from wheelbase + axle track
@@ -247,7 +251,7 @@ export class PhysicsWorld {
      * @param {number} dt — elapsed time in seconds (capped externally at 0.05)
      */
     step(dt) {
-        this.world.step(1 / 60, dt, 3);
+        this.world.step(1 / 60, dt, 5);
 
         // ── Hard floor guarantee ─────────────────────────────
         // If the chassis sinks so low that any wheel connection point goes
@@ -261,11 +265,14 @@ export class PhysicsWorld {
             const quat = this.chassisBody.quaternion;
             const tmp  = new CANNON.Vec3();
 
+            // Minimum Y for connection points: at least one wheel radius
+            // above the surface so the suspension ray always has room to hit.
+            const safeY = this._wheelRadius || 0.32;
+
             for (const info of this.vehicle.wheelInfos) {
                 quat.vmult(info.chassisConnectionPointLocal, tmp);
                 const worldY = pos.y + tmp.y;
-                // Keep at least 1 cm above the surface so the ray has room
-                const deficit = 0.01 - worldY;
+                const deficit = safeY - worldY;
                 if (deficit > worstDeficit) worstDeficit = deficit;
             }
 
@@ -275,6 +282,9 @@ export class PhysicsWorld {
                 if (this.chassisBody.velocity.y < 0) {
                     this.chassisBody.velocity.y = 0;
                 }
+                // Dampen pitch/roll oscillation that caused the deficit
+                this.chassisBody.angularVelocity.x *= 0.8;
+                this.chassisBody.angularVelocity.z *= 0.8;
             }
         }
 
