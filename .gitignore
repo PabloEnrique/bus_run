@@ -1,0 +1,44 @@
+# ── PHP / Laravel ──
+/vendor/
+.env
+.env.backup
+.env.production
+storage/*.key
+storage/framework/cache/*
+storage/framework/sessions/*
+storage/framework/views/*
+bootstrap/cache/*
+
+# ── Node.js ──
+node_modules/
+dist/
+public/build/
+public/hot
+
+# ── IDE ──
+.idea/
+.vscode/*
+!.vscode/settings.json
+!.vscode/extensions.json
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+
+# ── OS ──
+*.log
+npm-debug.log*
+
+# ── Game assets (large binaries tracked via Git LFS) ──
+# See .gitattributes for LFS patterns
+
+# ── Colyseus server ──
+colyseus-server/dist/
+colyseus-server/node_modules/
+
+# ── Testing ──
+coverage/
+.phpunit.result.cache
+
+# ── Zip artifact ──
+*.zip
