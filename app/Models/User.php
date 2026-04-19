@@ -14,7 +14,7 @@ class User extends Authenticatable
     /** @use HasFactory<UserFactory> */
     use HasFactory;
 
-    protected $fillable = ['name', 'password'];
+    protected $fillable = ['name', 'password', 'wallet_balance'];
 
     protected $hidden = ['password'];
 
@@ -22,13 +22,14 @@ class User extends Authenticatable
     {
         return [
             'password' => 'hashed',
+            'wallet_balance' => 'decimal:2',
         ];
     }
 
     public function garage(): BelongsToMany
     {
         return $this->belongsToMany(BusCatalog::class, 'user_garage', 'user_id', 'bus_id')
-            ->withPivot(['nickname', 'paint_hex', 'acquired_at'])
+            ->withPivot(['id', 'nickname', 'paint_hex', 'current_fuel_liters', 'acquired_at'])
             ->withTimestamps();
     }
 }

@@ -36,7 +36,7 @@ class BusCatalog extends Model
     public function owners(): BelongsToMany
     {
         return $this->belongsToMany(User::class, 'user_garage', 'bus_id', 'user_id')
-            ->withPivot(['nickname', 'paint_hex', 'acquired_at'])
+            ->withPivot(['id', 'nickname', 'paint_hex', 'current_fuel_liters', 'acquired_at'])
             ->withTimestamps();
     }
 }
