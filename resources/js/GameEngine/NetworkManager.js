@@ -18,27 +18,21 @@ export class NetworkManager {
 
         this.room.state.players.onAdd((player, sessionId) => {
             if (sessionId === this.room.sessionId) return;
-            if (this._callbacks.join) {
-                this._callbacks.join(sessionId, player);
-            }
+            this._callbacks.join?.(sessionId, player);
 
-            player.onChange(() => {
-                if (this._callbacks.update) {
-                    this._callbacks.update(sessionId, {
-                        x: player.x,
-                        y: player.y,
-                        z: player.z,
-                        rotation: player.rotation,
-                        speed: player.speed,
-                    });
-                }
+            player?.onChange(() => {
+                this._callbacks.update?.(sessionId, {
+                    x: player?.x ?? 0,
+                    y: player?.y ?? 0,
+                    z: player?.z ?? 0,
+                    rotation: player?.rotation ?? 0,
+                    speed: player?.speed ?? 0,
+                });
             });
         });
 
         this.room.state.players.onRemove((_player, sessionId) => {
-            if (this._callbacks.leave) {
-                this._callbacks.leave(sessionId);
-            }
+            this._callbacks.leave?.(sessionId);
         });
 
         return this.room;

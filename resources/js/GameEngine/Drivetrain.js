@@ -53,6 +53,7 @@ export class Drivetrain {
      * @param {number} specs.current_fuel_liters
      */
     constructor(specs) {
+        specs = specs || {};
         /** @type {number} Peak engine torque (Nm) */
         this.peakTorque = Number(specs.engine_torque_nm) || 400;
 

@@ -11,9 +11,11 @@ const props = defineProps({
     userId: Number,
 });
 
-const user = computed(() => usePage().props.auth.user);
+const user = computed(() => usePage().props?.auth?.user);
 const canvasRef = ref(null);
 const noBus = computed(() => !props.bus);
+const isLoading = ref(true);
+const initError = ref(null);
 
 // Telemetry refs
 const currentSpeed = ref(0);
@@ -60,60 +62,70 @@ function hexToInt(hex) {
 }
 
 async function initGame() {
-    if (!props.bus || !canvasRef.value) return;
-
-    // Drivetrain
-    drivetrain = new Drivetrain({
-        engine_torque_nm: props.bus.engine_torque_nm,
-        gear_ratios: props.bus.gear_ratios,
-        fuel_capacity_liters: props.bus.fuel_capacity_liters,
-        current_fuel_liters: props.bus.current_fuel_liters,
-    });
-    fuelCapacity.value = props.bus.fuel_capacity_liters;
-    currentFuel.value = props.bus.current_fuel_liters;
-
-    // Physics
-    physics = new PhysicsWorld();
-    physics.createVehicle({
-        base_weight_kg: props.bus.base_weight_kg,
-        suspension_stiffness: props.bus.suspension_stiffness,
-    });
-
-    // Scene
-    scene = new SceneManager(canvasRef.value);
-    const color = hexToInt(props.bus.paint_hex);
-    playerMesh = scene.createBusMesh(color);
-
-    // Network
-    network = new NetworkManager('ws://localhost:2567');
-    network.onPlayerJoin((sessionId) => {
-        scene.addRemotePlayer(sessionId, 0x4488ff);
-    });
-    network.onPlayerUpdate((sessionId, pos) => {
-        scene.updateRemotePlayer(sessionId, pos);
-    });
-    network.onPlayerLeave((sessionId) => {
-        scene.removeRemotePlayer(sessionId);
-    });
-
-    try {
-        await network.joinRace({
-            userId: props.userId,
-            torque: props.bus.engine_torque_nm,
-            weight: props.bus.base_weight_kg,
-        });
-        connected.value = true;
-    } catch (err) {
-        console.warn('[Race] Could not connect to game server:', err.message);
+    if (!props.bus || !canvasRef.value) {
+        isLoading.value = false;
+        return;
     }
 
-    // Input
-    window.addEventListener('keydown', onKeyDown);
-    window.addEventListener('keyup', onKeyUp);
+    try {
+        // Drivetrain
+        drivetrain = new Drivetrain({
+            engine_torque_nm: props.bus.engine_torque_nm,
+            gear_ratios: props.bus.gear_ratios,
+            fuel_capacity_liters: props.bus.fuel_capacity_liters,
+            current_fuel_liters: props.bus.current_fuel_liters,
+        });
+        fuelCapacity.value = props.bus.fuel_capacity_liters;
+        currentFuel.value = props.bus.current_fuel_liters;
 
-    // Start loop
-    lastTime = performance.now();
-    gameLoop();
+        // Physics
+        physics = new PhysicsWorld();
+        physics.createVehicle({
+            base_weight_kg: props.bus.base_weight_kg,
+            suspension_stiffness: props.bus.suspension_stiffness,
+        });
+
+        // Scene
+        scene = new SceneManager(canvasRef.value);
+        const color = hexToInt(props.bus.paint_hex);
+        playerMesh = scene.createBusMesh(color);
+
+        // Network (connection failure is non-fatal — game runs offline)
+        network = new NetworkManager('ws://localhost:2567');
+        network.onPlayerJoin((sessionId) => {
+            scene.addRemotePlayer(sessionId, 0x4488ff);
+        });
+        network.onPlayerUpdate((sessionId, pos) => {
+            scene.updateRemotePlayer(sessionId, pos);
+        });
+        network.onPlayerLeave((sessionId) => {
+            scene.removeRemotePlayer(sessionId);
+        });
+
+        try {
+            await network.joinRace({
+                userId: props.userId,
+                torque: props.bus.engine_torque_nm,
+                weight: props.bus.base_weight_kg,
+            });
+            connected.value = true;
+        } catch (err) {
+            console.warn('[Race] Could not connect to game server:', err.message);
+        }
+
+        // Input
+        window.addEventListener('keydown', onKeyDown);
+        window.addEventListener('keyup', onKeyUp);
+
+        // Start loop
+        isLoading.value = false;
+        lastTime = performance.now();
+        gameLoop();
+    } catch (err) {
+        console.error('[Race] Failed to initialise game:', err);
+        initError.value = err.message || 'Error desconocido';
+        isLoading.value = false;
+    }
 }
 
 function gameLoop() {
@@ -208,7 +220,11 @@ const fuelBarColor = computed(() => {
 });
 
 onMounted(() => {
-    initGame();
+    initGame().catch((err) => {
+        console.error('[Race] Unhandled init error:', err);
+        initError.value = err.message || 'Error desconocido';
+        isLoading.value = false;
+    });
 });
 
 onBeforeUnmount(() => {
@@ -233,11 +249,27 @@ onBeforeUnmount(() => {
             </div>
         </div>
 
+        <!-- Loading state -->
+        <div v-else-if="isLoading" class="flex h-full items-center justify-center">
+            <p class="text-xl text-amber-400 animate-pulse">Cargando pista...</p>
+        </div>
+
+        <!-- Init error state -->
+        <div v-else-if="initError" class="flex h-full items-center justify-center">
+            <div class="text-center">
+                <p class="text-xl text-red-400">Error al iniciar</p>
+                <p class="mt-2 text-sm text-gray-500">{{ initError }}</p>
+                <Link href="/dashboard" class="mt-4 inline-block text-amber-400 hover:text-amber-300">
+                    ← Volver al Dashboard
+                </Link>
+            </div>
+        </div>
+
         <!-- Game canvas -->
-        <canvas v-show="!noBus" ref="canvasRef" class="block h-full w-full" />
+        <canvas v-show="!noBus && !isLoading && !initError" ref="canvasRef" class="block h-full w-full" />
 
         <!-- HUD Overlay -->
-        <div v-if="!noBus" class="pointer-events-none absolute inset-0">
+        <div v-if="!noBus && !isLoading && !initError" class="pointer-events-none absolute inset-0">
             <!-- Top bar -->
             <div class="flex items-center justify-between px-4 py-3">
                 <div class="pointer-events-auto">
