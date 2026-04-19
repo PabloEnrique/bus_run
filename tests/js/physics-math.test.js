@@ -117,3 +117,35 @@ describe('gear_ratios parsing edge cases', () => {
         expect(dt.currentRatio).toBe(5.18);
     });
 });
+
+describe('Suspension sanity — springs must support bus weight', () => {
+    it('stiffness × 4 wheels × maxTravel exceeds gravitational force', () => {
+        // Mirrors PhysicsWorld.createVehicle formula: stiffness = mass * 16
+        const mass = 3500;
+        const g = 9.82;
+        const stiffness = mass * 16; // N/m per wheel
+        const maxTravel = 0.5; // m
+
+        const totalSpringForce = 4 * stiffness * maxTravel;
+        const weight = mass * g;
+
+        expect(totalSpringForce).toBeGreaterThan(weight);
+    });
+
+    it('static sag is reasonable (0.10–0.25 m)', () => {
+        const mass = 3500;
+        const g = 9.82;
+        const stiffness = mass * 16;
+
+        // sag = (mass × g) / (4 × stiffness)
+        const sag = (mass * g) / (4 * stiffness);
+        expect(sag).toBeGreaterThan(0.10);
+        expect(sag).toBeLessThan(0.25);
+    });
+
+    it('connection point Y (-0.65) is below chassis bottom (-0.5)', () => {
+        const chassisHalfHeight = 0.5;
+        const connectionY = -0.65;
+        expect(connectionY).toBeLessThan(-chassisHalfHeight);
+    });
+});

@@ -19,22 +19,27 @@ resources/js/GameEngine/
 
 Three materials govern surface interactions:
 
-| Material       | Used on                | Purpose                          |
-|----------------|------------------------|----------------------------------|
-| `trackMaterial`| Ground segments, infield| Asphalt surface                 |
-| `tireMaterial` | Chassis body           | Vehicle body (raycast wheels use `frictionSlip`) |
-| `wallMaterial` | Inner + outer barriers | Wall barriers                    |
+| Material         | Used on                  | Purpose                          |
+|------------------|--------------------------|----------------------------------|
+| `trackMaterial`  | Ground segments, infield | Asphalt surface                  |
+| `tireMaterial`   | (reserved for wheels)    | Tyre contact (raycast wheels use `frictionSlip`) |
+| `chassisMaterial`| Chassis body             | Near-zero ground friction — prevents scraping block |
+| `wallMaterial`   | Inner + outer barriers   | Wall barriers                    |
 
 Contact material pairs:
 
-| A              | B              | Friction | Restitution | Notes                        |
-|----------------|----------------|----------|-------------|------------------------------|
-| `trackMaterial`| `tireMaterial` | 0.6      | 0.05        | Good traction, minimal bounce|
-| `tireMaterial` | `wallMaterial` | 0.2      | 0.3         | Slippery bounce off walls    |
+| A                | B                | Friction | Restitution | Notes                        |
+|------------------|------------------|----------|-------------|------------------------------|
+| `trackMaterial`  | `tireMaterial`   | 0.6      | 0.05        | Good traction, minimal bounce|
+| `tireMaterial`   | `wallMaterial`   | 0.2      | 0.3         | Slippery bounce off walls    |
+| `chassisMaterial`| `trackMaterial`  | 0.01     | 0.0         | Chassis scrape doesn't block |
+| `chassisMaterial`| `wallMaterial`   | 0.1      | 0.3         | Chassis-wall bounce          |
 
-**Bug fixed (Sprint 8):** A duplicate `ContactMaterial(tireMaterial, wallMaterial)` was
-registered with friction 0.15 (overriding the intended 0.2). Cannon-es uses the last
-registered pair, which made wall collisions too slippery. Removed the duplicate.
+**Bug fixed (Sprint 8):** Duplicate `ContactMaterial(tireMaterial, wallMaterial)` removed.
+
+**Bug fixed (Sprint 8.2):** Chassis was using `tireMaterial` (friction 0.6 vs ground),
+so when the chassis bottomed out it created ~20 kN of friction blocking all movement.
+Now uses `chassisMaterial` (friction 0.01 vs ground).
 
 ### RaycastVehicle
 
@@ -42,7 +47,30 @@ registered pair, which made wall collisions too slippery. Removed the duplicate.
 - **Mass:** from `busSpecs.base_weight_kg` (typically 3500–5500 kg)
 - **Angular damping:** 0.4 — prevents unrealistic spinning
 - **Linear damping:** 0.05 — subtle rolling resistance
-- **Forward axis:** Z (index 2)
+- **Axis configuration:** Right = X (0), Up = Y (1), Forward = Z (2)
+- **Spawn position:** South straight center, Y = 2.0 (drops onto springs)
+
+### Suspension Geometry (Sprint 8.2 fix)
+
+**Problem:** Suspension stiffness was `spec × 100 ≈ 70 N/m` — 500× too weak to hold
+a 3500 kg bus. Connection point Y = 0 (chassis center) instead of below bottom.
+Result: chassis free-fell onto ground, all weight on box collision, zero wheel normal
+force, engine force through frictionSlip ≈ 0.
+
+**Fix:** Stiffness = `mass × 16` (≈ 56,000 N/m for 3500 kg, targeting 0.15 m static sag).
+Connection point Y = -0.65 (below chassis bottom at -0.5).
+
+| Parameter               | Before | After | Unit  |
+|--------------------------|--------|-------|-------|
+| `suspensionStiffness`    | 70     | 56000 | N/m   |
+| `suspensionRestLength`   | 0.3    | 0.6   | m     |
+| `maxSuspensionTravel`    | 0.3    | 0.5   | m     |
+| `dampingRelaxation`      | 3.0    | 5.0   | —     |
+| `dampingCompression`     | 4.0    | 4.5   | —     |
+| `maxSuspensionForce`     | mass×15| mass×20| N    |
+| Connection point Y       | 0      | -0.65 | m     |
+| Chassis material         | tire   | chassis| —    |
+| Spawn Y                  | 1.5    | 2.0   | m     |
 
 ### Wheel Configuration
 
