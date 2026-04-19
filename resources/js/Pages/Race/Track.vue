@@ -5,6 +5,7 @@ import { PhysicsWorld } from '../../GameEngine/PhysicsWorld.js';
 import { SceneManager } from '../../GameEngine/SceneManager.js';
 import { NetworkManager } from '../../GameEngine/NetworkManager.js';
 import { Drivetrain } from '../../GameEngine/Drivetrain.js';
+import { AudioManager } from '../../GameEngine/AudioManager.js';
 import { getMapById, DEFAULT_MAP_ID } from '../../GameEngine/maps/index.js';
 
 const props = defineProps({
@@ -34,6 +35,7 @@ let physics = null;
 let scene = null;
 let network = null;
 let drivetrain = null;
+let audio = null;
 let playerMesh = null;
 let animFrame = null;
 let lastTime = 0;
@@ -95,6 +97,8 @@ async function initGame() {
         fuelCapacity.value = props.bus.fuel_capacity_liters;
         currentFuel.value = props.bus.current_fuel_liters;
         console.info('[Race] Step 1/5: Drivetrain OK — gears:', drivetrain.gearCount, 'torque:', drivetrain.peakTorque, 'Nm');
+
+        audio = new AudioManager();
 
         console.info('[Race] Step 2/5: Creating physics world + vehicle...');
         const mapConfig = getMapById(props.mapId || DEFAULT_MAP_ID);
@@ -273,6 +277,11 @@ function gameLoop() {
     currentGear.value = drivetrain.gearLabel;
     currentFuel.value = Math.round(drivetrain.fuel * 10) / 10;
 
+    // Engine audio — pitch/volume from RPM and throttle
+    if (audio) {
+        audio.update(drivetrain.rpm, drivetrain.throttle, drivetrain.redlineRPM);
+    }
+
     // Camera — velocity-aware chase cam
     scene.updateCamera(playerMesh, vel);
 
@@ -332,6 +341,7 @@ onBeforeUnmount(() => {
     window.removeEventListener('keydown', onKeyDown);
     window.removeEventListener('keyup', onKeyUp);
     if (network) network.dispose();
+    if (audio) audio.destroy();
     if (scene) scene.dispose();
     if (physics) physics.destroy();
 });
