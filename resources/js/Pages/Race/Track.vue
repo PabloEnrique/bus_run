@@ -4,6 +4,7 @@ import { usePage, Link } from '@inertiajs/vue3';
 import { PhysicsWorld } from '../../GameEngine/PhysicsWorld.js';
 import { SceneManager } from '../../GameEngine/SceneManager.js';
 import { NetworkManager } from '../../GameEngine/NetworkManager.js';
+import { Drivetrain, REDLINE_RPM } from '../../GameEngine/Drivetrain.js';
 
 const props = defineProps({
     bus: Object,
@@ -12,23 +13,41 @@ const props = defineProps({
 
 const user = computed(() => usePage().props.auth.user);
 const canvasRef = ref(null);
-const currentSpeed = ref(0);
-const connected = ref(false);
 const noBus = computed(() => !props.bus);
+
+// Telemetry refs
+const currentSpeed = ref(0);
+const currentRPM = ref(800);
+const currentGear = ref('1');
+const currentFuel = ref(0);
+const fuelCapacity = ref(100);
+const connected = ref(false);
 
 let physics = null;
 let scene = null;
 let network = null;
+let drivetrain = null;
 let playerMesh = null;
 let animFrame = null;
 let lastTime = 0;
 
 // Input state
 const keys = { w: false, a: false, s: false, d: false };
+let shiftCooldown = 0;
 
 function onKeyDown(e) {
     const k = e.key.toLowerCase();
     if (k in keys) keys[k] = true;
+
+    // Gear shifting — E = up, Q = down
+    if (k === 'e' && drivetrain && shiftCooldown <= 0) {
+        drivetrain.shiftUp();
+        shiftCooldown = 0.3;
+    }
+    if (k === 'q' && drivetrain && shiftCooldown <= 0) {
+        drivetrain.shiftDown();
+        shiftCooldown = 0.3;
+    }
 }
 
 function onKeyUp(e) {
@@ -42,6 +61,16 @@ function hexToInt(hex) {
 
 async function initGame() {
     if (!props.bus || !canvasRef.value) return;
+
+    // Drivetrain
+    drivetrain = new Drivetrain({
+        engine_torque_nm: props.bus.engine_torque_nm,
+        gear_ratios: props.bus.gear_ratios,
+        fuel_capacity_liters: props.bus.fuel_capacity_liters,
+        current_fuel_liters: props.bus.current_fuel_liters,
+    });
+    fuelCapacity.value = props.bus.fuel_capacity_liters;
+    currentFuel.value = props.bus.current_fuel_liters;
 
     // Physics
     physics = new PhysicsWorld();
@@ -57,7 +86,7 @@ async function initGame() {
 
     // Network
     network = new NetworkManager('ws://localhost:2567');
-    network.onPlayerJoin((sessionId, player) => {
+    network.onPlayerJoin((sessionId) => {
         scene.addRemotePlayer(sessionId, 0x4488ff);
     });
     network.onPlayerUpdate((sessionId, pos) => {
@@ -91,22 +120,23 @@ function gameLoop() {
     animFrame = requestAnimationFrame(gameLoop);
 
     const now = performance.now();
-    const dt = (now - lastTime) / 1000;
+    const dt = Math.min((now - lastTime) / 1000, 0.05); // cap at 50ms
     lastTime = now;
 
-    if (!physics || !physics.vehicle || !scene) return;
+    if (!physics || !physics.vehicle || !scene || !drivetrain) return;
 
-    // Input → physics
-    const maxForce = (props.bus.engine_torque_nm || 400) * 3;
+    // Shift cooldown
+    if (shiftCooldown > 0) shiftCooldown -= dt;
+
+    // Drivetrain update
+    const wheelSpeed = physics.getRearWheelSpeed();
+    const throttleInput = keys.w ? 1.0 : 0;
+    const isBraking = keys.s;
+    const engineForce = drivetrain.update(wheelSpeed, throttleInput, isBraking, dt);
+
+    // Steering
     const maxSteer = 0.4;
-    const brakeForce = 50;
-
-    let engineForce = 0;
     let steering = 0;
-    let brake = 0;
-
-    if (keys.w) engineForce = maxForce;
-    if (keys.s) { engineForce = -maxForce * 0.5; brake = brakeForce; }
     if (keys.a) steering = maxSteer;
     if (keys.d) steering = -maxSteer;
 
@@ -118,9 +148,10 @@ function gameLoop() {
     physics.vehicle.setSteeringValue(steering, 0);
     physics.vehicle.setSteeringValue(steering, 1);
 
-    // Brake on all wheels
+    // Brake
+    const brakeForce = keys.s ? 80 : 0;
     for (let i = 0; i < 4; i++) {
-        physics.vehicle.setBrake(keys.s ? brake : 0, i);
+        physics.vehicle.setBrake(brakeForce, i);
     }
 
     // Step physics
@@ -129,10 +160,13 @@ function gameLoop() {
     // Sync visual
     scene.syncMeshToBody(playerMesh, physics.chassisBody, physics.wheelBodies);
 
-    // Speed HUD
+    // Update telemetry
     const vel = physics.chassisBody.velocity;
-    const speed = Math.sqrt(vel.x * vel.x + vel.z * vel.z) * 3.6; // m/s → km/h
+    const speed = Math.sqrt(vel.x * vel.x + vel.z * vel.z) * 3.6;
     currentSpeed.value = Math.round(speed);
+    currentRPM.value = Math.round(drivetrain.rpm);
+    currentGear.value = drivetrain.gearLabel;
+    currentFuel.value = Math.round(drivetrain.fuel * 10) / 10;
 
     // Camera
     scene.updateCamera(playerMesh);
@@ -140,19 +174,35 @@ function gameLoop() {
     // Network sync
     if (network && connected.value) {
         const pos = physics.chassisBody.position;
-        const euler = playerMesh.rotation;
         network.sendPosition({
             x: pos.x,
             y: pos.y,
             z: pos.z,
-            rotation: euler.y,
-            speed: speed,
+            rotation: playerMesh.rotation.y,
+            speed,
         });
     }
 
     // Render
     scene.render();
 }
+
+// RPM bar width for HUD (0–100%)
+const rpmPercent = computed(() => Math.min(100, (currentRPM.value / REDLINE_RPM) * 100));
+const rpmColor = computed(() => {
+    if (currentRPM.value > 2800) return 'bg-red-500';
+    if (currentRPM.value > 2200) return 'bg-amber-500';
+    return 'bg-green-500';
+});
+const fuelPercent = computed(() => {
+    if (fuelCapacity.value === 0) return 0;
+    return Math.round((currentFuel.value / fuelCapacity.value) * 100);
+});
+const fuelBarColor = computed(() => {
+    if (fuelPercent.value > 50) return 'bg-green-500';
+    if (fuelPercent.value > 20) return 'bg-amber-500';
+    return 'bg-red-500';
+});
 
 onMounted(() => {
     initGame();
@@ -200,26 +250,73 @@ onBeforeUnmount(() => {
                 </div>
             </div>
 
-            <!-- Bottom HUD -->
-            <div class="absolute bottom-6 left-1/2 -translate-x-1/2">
-                <div class="rounded-xl bg-black/60 px-8 py-4 text-center backdrop-blur">
-                    <p class="text-4xl font-bold tabular-nums text-white">{{ currentSpeed }}</p>
-                    <p class="text-xs uppercase tracking-widest text-gray-400">km/h</p>
+            <!-- Telemetry panel — bottom center -->
+            <div class="absolute bottom-4 left-1/2 -translate-x-1/2">
+                <div class="flex items-end gap-4 rounded-xl bg-black/70 px-6 py-4 backdrop-blur">
+                    <!-- Speedometer -->
+                    <div class="text-center">
+                        <p class="text-5xl font-bold tabular-nums text-white">{{ currentSpeed }}</p>
+                        <p class="text-[10px] uppercase tracking-widest text-gray-500">km/h</p>
+                    </div>
+
+                    <!-- Divider -->
+                    <div class="h-16 w-px bg-gray-700"></div>
+
+                    <!-- RPM + Gear -->
+                    <div class="w-40">
+                        <!-- RPM number -->
+                        <div class="mb-1 flex items-baseline justify-between">
+                            <span class="text-xs text-gray-500">RPM</span>
+                            <span class="font-mono text-sm tabular-nums text-gray-300">{{ currentRPM }}</span>
+                        </div>
+                        <!-- RPM bar -->
+                        <div class="h-3 w-full overflow-hidden rounded-full bg-gray-800">
+                            <div
+                                class="h-full rounded-full transition-all duration-75"
+                                :class="rpmColor"
+                                :style="{ width: rpmPercent + '%' }"
+                            ></div>
+                        </div>
+                        <!-- Gear indicator -->
+                        <div class="mt-2 text-center">
+                            <span class="text-3xl font-bold text-amber-400">{{ currentGear }}</span>
+                            <span class="ml-1 text-xs text-gray-600">marcha</span>
+                        </div>
+                    </div>
+
+                    <!-- Divider -->
+                    <div class="h-16 w-px bg-gray-700"></div>
+
+                    <!-- Fuel -->
+                    <div class="w-28">
+                        <div class="mb-1 flex items-baseline justify-between">
+                            <span class="text-xs text-gray-500">⛽ Fuel</span>
+                            <span class="font-mono text-xs tabular-nums text-gray-400">{{ currentFuel }} L</span>
+                        </div>
+                        <div class="h-3 w-full overflow-hidden rounded-full bg-gray-800">
+                            <div
+                                class="h-full rounded-full transition-all duration-300"
+                                :class="fuelBarColor"
+                                :style="{ width: fuelPercent + '%' }"
+                            ></div>
+                        </div>
+                        <p class="mt-1 text-center text-[10px] text-gray-600">{{ fuelPercent }}%</p>
+                    </div>
                 </div>
             </div>
 
-            <!-- Bus info -->
-            <div class="absolute bottom-6 right-4 rounded bg-black/50 px-3 py-2 text-right text-xs backdrop-blur">
+            <!-- Bus info — top right (below nav) -->
+            <div class="absolute right-4 top-14 rounded bg-black/50 px-3 py-2 text-right text-xs backdrop-blur">
                 <p class="text-amber-400">{{ bus?.model }}</p>
                 <p class="text-gray-500">{{ bus?.generation }}</p>
                 <p v-if="bus?.nickname" class="italic text-gray-600">"{{ bus.nickname }}"</p>
             </div>
 
-            <!-- Controls hint -->
-            <div class="absolute bottom-6 left-4 rounded bg-black/50 px-3 py-2 text-xs text-gray-500 backdrop-blur">
-                <p><kbd class="text-white">W</kbd> Acelerar</p>
-                <p><kbd class="text-white">S</kbd> Frenar</p>
+            <!-- Controls hint — bottom left -->
+            <div class="absolute bottom-4 left-4 rounded bg-black/50 px-3 py-2 text-xs text-gray-500 backdrop-blur">
+                <p><kbd class="text-white">W</kbd> Acelerar · <kbd class="text-white">S</kbd> Frenar</p>
                 <p><kbd class="text-white">A</kbd><kbd class="text-white">D</kbd> Girar</p>
+                <p><kbd class="text-white">E</kbd> Subir marcha · <kbd class="text-white">Q</kbd> Bajar</p>
             </div>
         </div>
     </div>
