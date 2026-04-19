@@ -9,6 +9,14 @@ const INNER_H = OUTER_H - TRACK_W * 2; //  60
 const WALL_HEIGHT = 2;
 const WALL_THICK = 0.5;
 
+// ── Collision groups ─────────────────────────────────────
+// RaycastVehicle raycasts use world.rayTest() which ignores collision
+// groups, so the wheel rays always detect the ground even though the
+// chassis body is set to pass through it.
+const COLLISION_GROUND  = 1;
+const COLLISION_WALL    = 2;
+const COLLISION_VEHICLE = 4;
+
 /**
  * Cannon-es physics world with RaycastVehicle, rectangular track and
  * material-based friction system.
@@ -83,11 +91,12 @@ export class PhysicsWorld {
         const halfThick = 0.1;        // ground slab half-thickness
 
         // Helper: static box at position
-        const addBox = (hx, hy, hz, px, py, pz, material) => {
+        const addBox = (hx, hy, hz, px, py, pz, material, group = COLLISION_GROUND) => {
             const body = new CANNON.Body({
                 mass: 0,
                 shape: new CANNON.Box(new CANNON.Vec3(hx, hy, hz)),
                 material,
+                collisionFilterGroup: group,
             });
             body.position.set(px, py, pz);
             this.world.addBody(body);
@@ -112,6 +121,7 @@ export class PhysicsWorld {
             mass: 0,
             shape: new CANNON.Plane(),
             material: this.trackMaterial,
+            collisionFilterGroup: COLLISION_GROUND,
         });
         fallback.quaternion.setFromEuler(-Math.PI / 2, 0, 0);
         fallback.position.set(0, -2, 0);
@@ -122,16 +132,16 @@ export class PhysicsWorld {
         const wt = WALL_THICK / 2;
 
         // Outer walls
-        addBox(halfOW, wh, wt,  0, wh,  halfOH + wt,  this.wallMaterial); // north outer
-        addBox(halfOW, wh, wt,  0, wh, -(halfOH + wt), this.wallMaterial); // south outer
-        addBox(wt, wh, halfOH,  halfOW + wt, wh, 0,   this.wallMaterial); // east outer
-        addBox(wt, wh, halfOH, -(halfOW + wt), wh, 0,  this.wallMaterial); // west outer
+        addBox(halfOW, wh, wt,  0, wh,  halfOH + wt,  this.wallMaterial, COLLISION_WALL); // north outer
+        addBox(halfOW, wh, wt,  0, wh, -(halfOH + wt), this.wallMaterial, COLLISION_WALL); // south outer
+        addBox(wt, wh, halfOH,  halfOW + wt, wh, 0,   this.wallMaterial, COLLISION_WALL); // east outer
+        addBox(wt, wh, halfOH, -(halfOW + wt), wh, 0,  this.wallMaterial, COLLISION_WALL); // west outer
 
         // Inner walls
-        addBox(halfIW, wh, wt,  0, wh,  halfIH + wt,  this.wallMaterial); // north inner
-        addBox(halfIW, wh, wt,  0, wh, -(halfIH + wt), this.wallMaterial); // south inner
-        addBox(wt, wh, halfIH,  halfIW + wt, wh, 0,   this.wallMaterial); // east inner
-        addBox(wt, wh, halfIH, -(halfIW + wt), wh, 0,  this.wallMaterial); // west inner
+        addBox(halfIW, wh, wt,  0, wh,  halfIH + wt,  this.wallMaterial, COLLISION_WALL); // north inner
+        addBox(halfIW, wh, wt,  0, wh, -(halfIH + wt), this.wallMaterial, COLLISION_WALL); // south inner
+        addBox(wt, wh, halfIH,  halfIW + wt, wh, 0,   this.wallMaterial, COLLISION_WALL); // east inner
+        addBox(wt, wh, halfIH, -(halfIW + wt), wh, 0,  this.wallMaterial, COLLISION_WALL); // west inner
     }
 
     /**
@@ -150,14 +160,19 @@ export class PhysicsWorld {
         // F = k × x  →  k = (mass × g) / (4 × sag)  ≈  mass × 16
         const stiffness = mass * 16;
 
-        // Chassis — use chassisMaterial (near-zero ground friction) so if chassis
-        // scrapes the ground it doesn't block movement.
+        // Chassis — collision group VEHICLE collides with WALL only (not GROUND).
+        // The RaycastVehicle wheel raycasts use world.rayTest() which bypasses
+        // collision groups, so they still detect the ground for spring forces.
+        // Without this, the chassis box rests on the ground and pushes the wheel
+        // connection points below the surface — making all raycasts miss.
         const chassisShape = new CANNON.Box(new CANNON.Vec3(1.0, 0.5, 2.0));
         this.chassisBody = new CANNON.Body({
             mass,
             material: this.chassisMaterial,
             angularDamping: 0.4,
             linearDamping: 0.05,
+            collisionFilterGroup: COLLISION_VEHICLE,
+            collisionFilterMask: COLLISION_WALL | COLLISION_VEHICLE,
         });
         this.chassisBody.addShape(chassisShape);
         // Spawn on south straight — high enough to settle onto springs
