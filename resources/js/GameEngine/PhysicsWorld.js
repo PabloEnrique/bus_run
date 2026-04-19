@@ -32,9 +32,10 @@ export class PhysicsWorld {
         this.world.defaultContactMaterial.friction = 0.2;
 
         // ── Materials ────────────────────────────────────────
-        this.trackMaterial = new CANNON.Material('track');
-        this.tireMaterial  = new CANNON.Material('tire');
-        this.wallMaterial  = new CANNON.Material('wall');
+        this.trackMaterial   = new CANNON.Material('track');
+        this.tireMaterial    = new CANNON.Material('tire');
+        this.wallMaterial    = new CANNON.Material('wall');
+        this.chassisMaterial = new CANNON.Material('chassis');
 
         // tire ↔ track — good forward traction, enough lateral grip for handling
         this.world.addContactMaterial(new CANNON.ContactMaterial(
@@ -46,6 +47,18 @@ export class PhysicsWorld {
         this.world.addContactMaterial(new CANNON.ContactMaterial(
             this.tireMaterial, this.wallMaterial,
             { friction: 0.2, restitution: 0.3 },
+        ));
+
+        // chassis ↔ track — near-zero friction so chassis scraping doesn't block movement
+        this.world.addContactMaterial(new CANNON.ContactMaterial(
+            this.chassisMaterial, this.trackMaterial,
+            { friction: 0.01, restitution: 0.0 },
+        ));
+
+        // chassis ↔ wall
+        this.world.addContactMaterial(new CANNON.ContactMaterial(
+            this.chassisMaterial, this.wallMaterial,
+            { friction: 0.1, restitution: 0.3 },
         ));
 
         // ── Track geometry ───────────────────────────────────
@@ -132,19 +145,23 @@ export class PhysicsWorld {
      */
     createVehicle(busSpecs) {
         const mass = busSpecs.base_weight_kg || 3500;
-        const stiffness = (busSpecs.suspension_stiffness || 0.7) * 100;
 
-        // Chassis
+        // Stiffness: each spring must support mass/4 with ~0.15 m static sag.
+        // F = k × x  →  k = (mass × g) / (4 × sag)  ≈  mass × 16
+        const stiffness = mass * 16;
+
+        // Chassis — use chassisMaterial (near-zero ground friction) so if chassis
+        // scrapes the ground it doesn't block movement.
         const chassisShape = new CANNON.Box(new CANNON.Vec3(1.0, 0.5, 2.0));
         this.chassisBody = new CANNON.Body({
             mass,
-            material: this.tireMaterial,
+            material: this.chassisMaterial,
             angularDamping: 0.4,
             linearDamping: 0.05,
         });
         this.chassisBody.addShape(chassisShape);
-        // Spawn on south straight, facing +X
-        this.chassisBody.position.set(0, 1.5, -(OUTER_H / 2 - TRACK_W / 2));
+        // Spawn on south straight — high enough to settle onto springs
+        this.chassisBody.position.set(0, 2.0, -(OUTER_H / 2 - TRACK_W / 2));
 
         const vehicle = new CANNON.RaycastVehicle({
             chassisBody: this.chassisBody,
@@ -153,18 +170,19 @@ export class PhysicsWorld {
             indexForwardAxis: 2,
         });
 
-        // Shared wheel options
+        // Shared wheel options — connection point Y = -0.65 places ray origin
+        // below the chassis bottom (-0.5) so springs carry the full weight.
         const sharedWheel = {
             radius: 0.35,
             directionLocal: new CANNON.Vec3(0, -1, 0),
             axleLocal: new CANNON.Vec3(-1, 0, 0),
             suspensionStiffness: stiffness,
-            suspensionRestLength: 0.3,
-            dampingRelaxation: 3.0,
-            dampingCompression: 4.0,
+            suspensionRestLength: 0.6,
+            dampingRelaxation: 5.0,
+            dampingCompression: 4.5,
             rollInfluence: 0.05,
-            maxSuspensionForce: mass * 15,
-            maxSuspensionTravel: 0.3,
+            maxSuspensionForce: mass * 20,
+            maxSuspensionTravel: 0.5,
             customSlidingRotationalSpeed: -30,
             useCustomSlidingRotationalSpeed: true,
         };
@@ -174,10 +192,10 @@ export class PhysicsWorld {
         // Rear wheels — higher frictionSlip → hold traction → stable rear
         const rearWheel  = { ...sharedWheel, frictionSlip: 3.0 };
 
-        vehicle.addWheel({ ...frontWheel, chassisConnectionPointLocal: new CANNON.Vec3(-1.0, 0, 1.5) });
-        vehicle.addWheel({ ...frontWheel, chassisConnectionPointLocal: new CANNON.Vec3( 1.0, 0, 1.5) });
-        vehicle.addWheel({ ...rearWheel,  chassisConnectionPointLocal: new CANNON.Vec3(-1.0, 0, -1.2) });
-        vehicle.addWheel({ ...rearWheel,  chassisConnectionPointLocal: new CANNON.Vec3( 1.0, 0, -1.2) });
+        vehicle.addWheel({ ...frontWheel, chassisConnectionPointLocal: new CANNON.Vec3(-1.0, -0.65, 1.5) });
+        vehicle.addWheel({ ...frontWheel, chassisConnectionPointLocal: new CANNON.Vec3( 1.0, -0.65, 1.5) });
+        vehicle.addWheel({ ...rearWheel,  chassisConnectionPointLocal: new CANNON.Vec3(-1.0, -0.65, -1.2) });
+        vehicle.addWheel({ ...rearWheel,  chassisConnectionPointLocal: new CANNON.Vec3( 1.0, -0.65, -1.2) });
 
         vehicle.addToWorld(this.world);
 

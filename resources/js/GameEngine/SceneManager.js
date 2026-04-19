@@ -145,10 +145,10 @@ export class SceneManager {
         const wheelMat = new THREE.MeshStandardMaterial({ color: 0x222222, roughness: 0.8 });
 
         const wheelPositions = [
-            [-1.0, -0.3, 1.5],
-            [1.0, -0.3, 1.5],
-            [-1.0, -0.3, -1.2],
-            [1.0, -0.3, -1.2],
+            [-1.0, -0.65, 1.5],
+            [1.0, -0.65, 1.5],
+            [-1.0, -0.65, -1.2],
+            [1.0, -0.65, -1.2],
         ];
 
         group.wheels = [];
