@@ -48,8 +48,8 @@ describe('Drivetrain — constructor & gear parsing', () => {
 describe('Drivetrain — torqueCurve', () => {
     const dt = new Drivetrain(SPECS);
 
-    it('returns 0.4 at idle RPM', () => {
-        expect(dt.torqueCurve(IDLE_RPM)).toBe(0.4);
+    it('returns 0.5 at idle RPM', () => {
+        expect(dt.torqueCurve(IDLE_RPM)).toBe(0.5);
     });
 
     it('returns 1.0 in peak plateau (1800–2500)', () => {
@@ -58,13 +58,13 @@ describe('Drivetrain — torqueCurve', () => {
         expect(dt.torqueCurve(2500)).toBe(1.0);
     });
 
-    it('returns 0.3 at redline', () => {
-        expect(dt.torqueCurve(REDLINE_RPM)).toBe(0.3);
+    it('returns 0.5 at redline', () => {
+        expect(dt.torqueCurve(REDLINE_RPM)).toBe(0.5);
     });
 
-    it('ramps between idle and peak (value between 0.4 and 1.0)', () => {
+    it('ramps between idle and peak (value between 0.5 and 1.0)', () => {
         const val = dt.torqueCurve(1300);
-        expect(val).toBeGreaterThan(0.4);
+        expect(val).toBeGreaterThan(0.5);
         expect(val).toBeLessThan(1.0);
     });
 

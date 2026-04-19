@@ -38,24 +38,24 @@ describe('computeRPM — wheel speed to RPM mapping', () => {
     });
 
     it('increases with wheel speed in 1st gear', () => {
-        const rpmLow = dt.computeRPM(1);
-        const rpmHigh = dt.computeRPM(5);
+        const rpmLow = dt.computeRPM(10);
+        const rpmHigh = dt.computeRPM(20);
         expect(rpmHigh).toBeGreaterThan(rpmLow);
     });
 
     it('produces expected value for known inputs', () => {
         // 1st gear (5.18), wheelSpeed = 2 rad/s
-        // engineRadPerSec = 2 × 5.18 × 4.1 = 42.476
-        // RPM = (42.476 × 60) / (2π) ≈ 405.5 → clamped to IDLE (800)
+        // engineRadPerSec = 2 × 5.18 × 2.8 = 29.008
+        // RPM = (29.008 × 60) / (2π) ≈ 277 → clamped to IDLE (800)
         dt.currentGear = 1;
         const rpm = dt.computeRPM(2);
         expect(rpm).toBe(IDLE_RPM); // below idle → clamped
 
         // Higher speed: wheelSpeed = 10 rad/s in 1st
-        // engineRadPerSec = 10 × 5.18 × 4.1 = 212.38
-        // RPM = (212.38 × 60) / (2π) ≈ 2027.6
+        // engineRadPerSec = 10 × 5.18 × 2.8 = 145.04
+        // RPM = (145.04 × 60) / (2π) ≈ 1385.0
         const rpmHigh = dt.computeRPM(10);
-        expect(rpmHigh).toBeCloseTo(2027.6, 0);
+        expect(rpmHigh).toBeCloseTo(1385.0, 0);
     });
 });
 
@@ -183,18 +183,18 @@ describe('Aerodynamic drag model', () => {
     it('rolling resistance is constant regardless of speed', () => {
         const dt = new Drivetrain(SPECS);
         const res0  = dt.rollingResistance;
-        // Crr × mass × g = 0.012 × 3250 × 9.82 ≈ 383 N
-        expect(res0).toBeGreaterThan(350);
-        expect(res0).toBeLessThan(420);
+        // Crr × mass × g = 0.008 × 3250 × 9.82 ≈ 255 N
+        expect(res0).toBeGreaterThan(230);
+        expect(res0).toBeLessThan(280);
     });
 
     it('total resistance at 100 km/h is significant but less than engine force', () => {
         const dt = new Drivetrain(SPECS);
         const speedMs = 100 / 3.6; // ~27.8 m/s
         const resistance = dt.computeResistance(speedMs);
-        // Should be a few thousand N (drag + rolling)
-        expect(resistance).toBeGreaterThan(1000);
-        expect(resistance).toBeLessThan(10000);
+        // Should be several hundred N (drag + rolling)
+        expect(resistance).toBeGreaterThan(500);
+        expect(resistance).toBeLessThan(5000);
     });
 
     it('heavier bus with higher Cd has more drag', () => {

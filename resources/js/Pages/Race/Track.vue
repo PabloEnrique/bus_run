@@ -202,19 +202,34 @@ function gameLoop() {
     physics.vehicle.setSteeringValue(steering, 0);
     physics.vehicle.setSteeringValue(steering, 1);
 
-    // Brake + aerodynamic drag + rolling resistance
-    const speedMs = speed / 3.6;
-    const resistanceForce = drivetrain.computeResistance(speedMs);
-    // Apply resistance as brake force distributed across all wheels
-    // (cannon-es setBrake is a friction-like force, always opposes motion)
-    const resistanceBrake = resistanceForce / 4;
+    // Manual brake (S key)
     const manualBrake = keys.s ? 80 : 0;
     for (let i = 0; i < 4; i++) {
-        physics.vehicle.setBrake(manualBrake + resistanceBrake, i);
+        physics.vehicle.setBrake(manualBrake, i);
     }
 
     // Step physics
     physics.step(dt);
+
+    // ── Aerodynamic drag + rolling resistance ────────────────
+    // Applied as a post-step velocity reduction, NOT via applyForce().
+    // cannon-es clears body.force after each internal sub-step, but
+    // applyForce() only fires once per frame — when the world runs
+    // multiple sub-steps the resistance is under-applied, and when
+    // frames outpace the fixed timestep the force accumulates.
+    // Decelerating the velocity directly after the step avoids both
+    // problems and keeps drag frame-rate-independent.
+    {
+        const v = physics.chassisBody.velocity;
+        const spd = Math.sqrt(v.x * v.x + v.z * v.z);
+        if (spd > 0.05) {
+            const resistance = drivetrain.computeResistance(spd);
+            const decel = Math.min(spd, (resistance / physics.chassisBody.mass) * dt);
+            const ratio = (spd - decel) / spd;
+            v.x *= ratio;
+            v.z *= ratio;
+        }
+    }
 
     // Diagnostic: log wheel ground contact once per second
     _contactLogTimer += dt;

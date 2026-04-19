@@ -25,7 +25,7 @@ const IDLE_RPM = 800;
 /** @constant {number} Default redline */
 const DEFAULT_REDLINE_RPM = 3200;
 /** @constant {number} Final-drive (differential) ratio */
-const FINAL_DRIVE_RATIO = 4.1;
+const FINAL_DRIVE_RATIO = 2.8;
 /** @constant {number} Tyre rolling radius in metres — must match PhysicsWorld */
 const WHEEL_RADIUS = 0.35;
 /** @constant {number} Base fuel consumption rate (L / s / load-unit) */
@@ -35,7 +35,7 @@ const ENGINE_INERTIA = 5.0;
 /** @constant {number} Air density at sea level (kg/m³) */
 const AIR_DENSITY = 1.225;
 /** @constant {number} Rolling resistance coefficient (asphalt) */
-const ROLLING_RESISTANCE_COEFF = 0.012;
+const ROLLING_RESISTANCE_COEFF = 0.008;
 /** @constant {number} Gravity (m/s²) */
 const GRAVITY = 9.82;
 
@@ -70,7 +70,7 @@ export class Drivetrain {
         const busWidth  = Number(specs.width_m)  || 2.0;
         const busHeight = Number(specs.height_m) || 2.6;
         const Cd = Number(specs.drag_coefficient) || 0.70;
-        const frontalArea = busWidth * busHeight * 0.85;
+        const frontalArea = busWidth * busHeight * 0.35;
         /** @type {number} Precomputed 0.5 × ρ × Cd × A for drag force calc */
         this.dragFactor = 0.5 * AIR_DENSITY * Cd * frontalArea;
 
@@ -115,20 +115,20 @@ export class Drivetrain {
     get hasFuel() { return this.fuel > 0; }
 
     /**
-     * Diesel torque curve — normalised multiplier (0.3–1.0).
+     * Diesel torque curve — normalised multiplier (0.5–1.0).
      * Uses per-bus RPM breakpoints.
      */
     torqueCurve(rpm) {
-        if (rpm <= IDLE_RPM) return 0.4;
-        if (rpm >= this.redlineRPM) return 0.3;
+        if (rpm <= IDLE_RPM) return 0.5;
+        if (rpm >= this.redlineRPM) return 0.5;
         if (rpm >= this.peakTorqueRPMLow && rpm <= this.peakTorqueRPMHigh) return 1.0;
 
         if (rpm < this.peakTorqueRPMLow) {
             const t = (rpm - IDLE_RPM) / (this.peakTorqueRPMLow - IDLE_RPM);
-            return 0.4 + t * 0.6;
+            return 0.5 + t * 0.5;
         }
         const t = (rpm - this.peakTorqueRPMHigh) / (this.redlineRPM - this.peakTorqueRPMHigh);
-        return 1.0 - t * 0.7;
+        return 1.0 - t * 0.5;
     }
 
     computeRPM(wheelSpeed) {
