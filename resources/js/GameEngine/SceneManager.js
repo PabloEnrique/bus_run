@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { OUTER_W, OUTER_H, INNER_W, INNER_H, TRACK_W, WALL_HEIGHT } from './PhysicsWorld.js';
 
 export class SceneManager {
     constructor(canvas) {
@@ -10,10 +11,10 @@ export class SceneManager {
 
         this.scene = new THREE.Scene();
         this.scene.background = new THREE.Color(0x87ceeb);
-        this.scene.fog = new THREE.Fog(0x87ceeb, 100, 400);
+        this.scene.fog = new THREE.Fog(0x87ceeb, 200, 600);
 
         // Camera
-        this.camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 500);
+        this.camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 800);
         this.camera.position.set(0, 5, -8);
 
         // Lights
@@ -24,38 +25,101 @@ export class SceneManager {
         sun.position.set(50, 80, 30);
         sun.castShadow = true;
         sun.shadow.mapSize.set(2048, 2048);
-        sun.shadow.camera.left = -50;
-        sun.shadow.camera.right = 50;
-        sun.shadow.camera.top = 50;
-        sun.shadow.camera.bottom = -50;
+        sun.shadow.camera.left = -100;
+        sun.shadow.camera.right = 100;
+        sun.shadow.camera.top = 100;
+        sun.shadow.camera.bottom = -100;
+        sun.shadow.camera.far = 250;
         this.scene.add(sun);
 
-        // Ground
-        const groundGeo = new THREE.PlaneGeometry(500, 500);
-        const groundMat = new THREE.MeshStandardMaterial({
-            color: 0x3a3a3a,
-            roughness: 0.9,
-        });
-        const ground = new THREE.Mesh(groundGeo, groundMat);
-        ground.rotation.x = -Math.PI / 2;
-        ground.receiveShadow = true;
-        this.scene.add(ground);
+        // Build track visuals
+        this._createTrackVisuals();
 
-        // Grid helper for spatial reference
-        const grid = new THREE.GridHelper(500, 100, 0x555555, 0x444444);
-        grid.position.y = 0.01;
-        this.scene.add(grid);
-
-        // Remote players map
+        // Remote players map — { mesh, targetPos, targetRotY }
         this.remotePlayers = new Map();
 
         // Camera smoothing
         this._cameraTarget = new THREE.Vector3();
-        this._cameraOffset = new THREE.Vector3(0, 4, -8);
 
         // Resize handler
         this._onResize = () => this.resize();
         window.addEventListener('resize', this._onResize);
+    }
+
+    // ─────────────────────────────────────────────────────────
+    //  Track visuals
+    // ─────────────────────────────────────────────────────────
+
+    _createTrackVisuals() {
+        const halfOW = OUTER_W / 2;
+        const halfOH = OUTER_H / 2;
+        const halfIW = INNER_W / 2;
+        const halfIH = INNER_H / 2;
+        const tw = TRACK_W;
+
+        // Materials
+        const asphalt = new THREE.MeshStandardMaterial({ color: 0x333333, roughness: 0.9 });
+        const wallMat = new THREE.MeshStandardMaterial({ color: 0x888888, roughness: 0.7 });
+        const grassMat = new THREE.MeshStandardMaterial({ color: 0x2d5a1e, roughness: 0.95 });
+        const dirtMat  = new THREE.MeshStandardMaterial({ color: 0x4a3728, roughness: 0.95 });
+        const lineMat  = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.8 });
+
+        const addMesh = (geo, mat, px, py, pz) => {
+            const m = new THREE.Mesh(geo, mat);
+            m.position.set(px, py, pz);
+            m.receiveShadow = true;
+            this.scene.add(m);
+            return m;
+        };
+
+        // ── Track surface (4 straights) ──────────────────────
+        // North: OUTER_W × tw
+        addMesh(new THREE.BoxGeometry(OUTER_W, 0.15, tw), asphalt, 0, -0.075, halfOH - tw / 2);
+        // South
+        addMesh(new THREE.BoxGeometry(OUTER_W, 0.15, tw), asphalt, 0, -0.075, -(halfOH - tw / 2));
+        // East: tw × INNER_H
+        addMesh(new THREE.BoxGeometry(tw, 0.15, INNER_H), asphalt, halfOW - tw / 2, -0.075, 0);
+        // West
+        addMesh(new THREE.BoxGeometry(tw, 0.15, INNER_H), asphalt, -(halfOW - tw / 2), -0.075, 0);
+
+        // ── Infield (green) ──────────────────────────────────
+        addMesh(new THREE.BoxGeometry(INNER_W, 0.05, INNER_H), grassMat, 0, -0.15, 0);
+
+        // ── Outside ground (brown) ───────────────────────────
+        const outsideGeo = new THREE.PlaneGeometry(500, 500);
+        const outside = new THREE.Mesh(outsideGeo, dirtMat);
+        outside.rotation.x = -Math.PI / 2;
+        outside.position.y = -0.2;
+        outside.receiveShadow = true;
+        this.scene.add(outside);
+
+        // ── Start / finish line (south straight, white stripe) ──
+        addMesh(new THREE.BoxGeometry(tw, 0.16, 1.0), lineMat, 0, 0, -(halfOH - tw / 2));
+
+        // ── Walls ────────────────────────────────────────────
+        const wh = WALL_HEIGHT;
+        const wt = 0.5;
+
+        const addWall = (sx, sy, sz, px, py, pz) => {
+            const geo = new THREE.BoxGeometry(sx, sy, sz);
+            const m = new THREE.Mesh(geo, wallMat);
+            m.position.set(px, py, pz);
+            m.castShadow = true;
+            m.receiveShadow = true;
+            this.scene.add(m);
+        };
+
+        // Outer walls
+        addWall(OUTER_W, wh, wt,  0, wh / 2,  halfOH + wt / 2);
+        addWall(OUTER_W, wh, wt,  0, wh / 2, -(halfOH + wt / 2));
+        addWall(wt, wh, OUTER_H,  halfOW + wt / 2, wh / 2, 0);
+        addWall(wt, wh, OUTER_H, -(halfOW + wt / 2), wh / 2, 0);
+
+        // Inner walls
+        addWall(INNER_W, wh, wt,  0, wh / 2,  halfIH + wt / 2);
+        addWall(INNER_W, wh, wt,  0, wh / 2, -(halfIH + wt / 2));
+        addWall(wt, wh, INNER_H,  halfIW + wt / 2, wh / 2, 0);
+        addWall(wt, wh, INNER_H, -(halfIW + wt / 2), wh / 2, 0);
     }
 
     createBusMesh(color = 0xffb300) {
@@ -143,37 +207,70 @@ export class SceneManager {
 
     addRemotePlayer(id, color = 0x4488ff) {
         const mesh = this.createBusMesh(color);
-        this.remotePlayers.set(id, mesh);
+        this.remotePlayers.set(id, {
+            mesh,
+            targetPos: new THREE.Vector3(),
+            targetRotY: 0,
+        });
         return mesh;
     }
 
     updateRemotePlayer(id, position) {
-        const mesh = this.remotePlayers.get(id);
-        if (!mesh) return;
-        mesh.position.set(position.x, position.y, position.z);
-        mesh.rotation.y = position.rotation || 0;
+        const entry = this.remotePlayers.get(id);
+        if (!entry) return;
+        // Set interpolation targets — do NOT snap directly
+        entry.targetPos.set(position.x, position.y, position.z);
+        entry.targetRotY = position.rotation || 0;
+    }
+
+    /** Smoothly interpolate remote players toward their targets each frame */
+    lerpRemotePlayers(alpha = 0.15) {
+        this.remotePlayers.forEach((entry) => {
+            entry.mesh.position.lerp(entry.targetPos, alpha);
+            entry.mesh.rotation.y = THREE.MathUtils.lerp(entry.mesh.rotation.y, entry.targetRotY, alpha);
+        });
     }
 
     removeRemotePlayer(id) {
-        const mesh = this.remotePlayers.get(id);
-        if (mesh) {
-            this.scene.remove(mesh);
+        const entry = this.remotePlayers.get(id);
+        if (entry) {
+            this.scene.remove(entry.mesh);
             this.remotePlayers.delete(id);
         }
     }
 
-    updateCamera(target) {
+    /**
+     * Velocity-aware chase camera.
+     * @param {THREE.Object3D} target — player mesh
+     * @param {{ x: number, y: number, z: number }} velocity — chassis velocity from Cannon-es
+     */
+    updateCamera(target, velocity) {
         if (!target) return;
 
-        // Third-person chase camera
-        const forward = new THREE.Vector3(0, 0, -1).applyQuaternion(target.quaternion);
+        // Speed in m/s (horizontal)
+        const speed = velocity
+            ? Math.sqrt(velocity.x * velocity.x + velocity.z * velocity.z)
+            : 0;
+
+        // Dynamic distance + height
+        const dist   = 8 + Math.min(speed * 0.05, 4);
+        const height = 4 + Math.min(speed * 0.03, 1.5);
+
+        // Camera behind bus
+        const forward = new THREE.Vector3(0, 0, 1).applyQuaternion(target.quaternion);
         const desiredPos = new THREE.Vector3()
             .copy(target.position)
-            .add(forward.clone().multiplyScalar(-8))
-            .add(new THREE.Vector3(0, 4, 0));
+            .add(forward.clone().multiplyScalar(-dist))
+            .add(new THREE.Vector3(0, height, 0));
 
-        this.camera.position.lerp(desiredPos, 0.05);
-        this._cameraTarget.copy(target.position).add(new THREE.Vector3(0, 1, 0));
+        this.camera.position.lerp(desiredPos, 0.08);
+
+        // Look-ahead: look at a point ahead of the bus proportional to speed
+        const lookAhead = Math.min(speed * 0.3, 10);
+        this._cameraTarget
+            .copy(target.position)
+            .add(forward.clone().multiplyScalar(lookAhead))
+            .add(new THREE.Vector3(0, 1, 0));
         this.camera.lookAt(this._cameraTarget);
     }
 
@@ -189,7 +286,7 @@ export class SceneManager {
 
     dispose() {
         window.removeEventListener('resize', this._onResize);
-        this.remotePlayers.forEach((mesh) => this.scene.remove(mesh));
+        this.remotePlayers.forEach((entry) => this.scene.remove(entry.mesh));
         this.remotePlayers.clear();
         this.renderer.dispose();
     }
