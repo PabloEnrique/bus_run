@@ -6,6 +6,7 @@ namespace App\Models;
 
 use Database\Factories\UserFactory;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
+use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Foundation\Auth\User as Authenticatable;
 
 class User extends Authenticatable
@@ -22,5 +23,12 @@ class User extends Authenticatable
         return [
             'password' => 'hashed',
         ];
+    }
+
+    public function garage(): BelongsToMany
+    {
+        return $this->belongsToMany(BusCatalog::class, 'user_garage', 'user_id', 'bus_id')
+            ->withPivot(['nickname', 'paint_hex', 'acquired_at'])
+            ->withTimestamps();
     }
 }
