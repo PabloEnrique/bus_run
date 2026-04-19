@@ -1,6 +1,6 @@
 import * as CANNON from 'cannon-es';
 
-// ── Track dimensions ─────────────────────────────────────────
+/** @module PhysicsWorld — Track dimensions (metres) */
 const OUTER_W = 160;   // outer width  (X axis)
 const OUTER_H = 100;   // outer height (Z axis)
 const TRACK_W = 20;    // lane width
@@ -9,6 +9,21 @@ const INNER_H = OUTER_H - TRACK_W * 2; //  60
 const WALL_HEIGHT = 2;
 const WALL_THICK = 0.5;
 
+/**
+ * Cannon-es physics world with RaycastVehicle, rectangular track and
+ * material-based friction system.
+ *
+ * Materials:
+ *  - trackMaterial — asphalt surface (high friction with tyres)
+ *  - tireMaterial  — used on chassis body (RaycastVehicle wheels use frictionSlip)
+ *  - wallMaterial  — barriers (low friction, some bounce)
+ *
+ * Contact pairs:
+ *  | A            | B            | friction | restitution |
+ *  |--------------|--------------|----------|-------------|
+ *  | trackMaterial| tireMaterial | 0.6      | 0.05        |
+ *  | tireMaterial | wallMaterial | 0.2      | 0.3         |
+ */
 export class PhysicsWorld {
     constructor() {
         this.world = new CANNON.World();
@@ -27,16 +42,10 @@ export class PhysicsWorld {
             { friction: 0.6, restitution: 0.05 },
         ));
 
-        // tire ↔ wall — slippery bounce off barriers
+        // tire / chassis ↔ wall — slippery bounce off barriers
         this.world.addContactMaterial(new CANNON.ContactMaterial(
             this.tireMaterial, this.wallMaterial,
             { friction: 0.2, restitution: 0.3 },
-        ));
-
-        // chassis ↔ wall — when body clips a wall
-        this.world.addContactMaterial(new CANNON.ContactMaterial(
-            this.tireMaterial, this.wallMaterial,
-            { friction: 0.15, restitution: 0.25 },
         ));
 
         // ── Track geometry ───────────────────────────────────
@@ -46,10 +55,11 @@ export class PhysicsWorld {
         this.chassisBody = null;
     }
 
-    // ─────────────────────────────────────────────────────────
-    //  Track: rectangular loop + walls
-    // ─────────────────────────────────────────────────────────
-
+    /**
+     * Build the rectangular loop track (160×100 m outer, 20 m lane width)
+     * with ground segments, infield, fallback plane, and wall barriers.
+     * @private
+     */
     _createTrack() {
         const halfOW = OUTER_W / 2;   // 80
         const halfOH = OUTER_H / 2;   // 50
@@ -111,10 +121,15 @@ export class PhysicsWorld {
         addBox(wt, wh, halfIH, -(halfIW + wt), wh, 0,  this.wallMaterial); // west inner
     }
 
-    // ─────────────────────────────────────────────────────────
-    //  Vehicle
-    // ─────────────────────────────────────────────────────────
-
+    /**
+     * Create a RaycastVehicle from bus catalog specs.
+     *
+     * Front wheels use lower frictionSlip (1.8) for natural understeer;
+     * rear wheels use higher frictionSlip (3.0) for a stable rear axle.
+     *
+     * @param {{ base_weight_kg: number, suspension_stiffness: number }} busSpecs
+     * @returns {CANNON.RaycastVehicle}
+     */
     createVehicle(busSpecs) {
         const mass = busSpecs.base_weight_kg || 3500;
         const stiffness = (busSpecs.suspension_stiffness || 0.7) * 100;
@@ -182,6 +197,10 @@ export class PhysicsWorld {
         return vehicle;
     }
 
+    /**
+     * Advance the physics simulation by one frame.
+     * @param {number} dt — elapsed time in seconds (capped externally at 0.05)
+     */
     step(dt) {
         this.world.step(1 / 60, dt, 3);
 
@@ -204,6 +223,7 @@ export class PhysicsWorld {
         return (w2 + w3) / 2;
     }
 
+    /** Tear down the physics world and remove the vehicle. */
     destroy() {
         if (this.vehicle) {
             this.vehicle.removeFromWorld(this.world);
