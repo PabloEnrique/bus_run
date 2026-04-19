@@ -1,22 +1,75 @@
-# Hot Bus Drive 🚌
+# 🚌 Hot Bus Drive
 
-Multiplayer web-based bus (guagua) racing game with simulation-grade vehicle physics.
+Multiplayer bus racing game inspired by Caribbean public transport culture. Race real-world bus models through chaotic urban circuits — drift, draft, and dominate.
 
 ## Tech Stack
 
-- **Portal/Backend:** PHP (Laravel 11), Vue 3, InertiaJS
-- **Game Client:** Three.js + Rapier (or Godot 4 HTML5)
-- **Networking:** Node.js + Colyseus
-- **Database:** MySQL 8 / PostgreSQL 16
+- **Backend:** Laravel 11 · PHP 8.3 · MySQL 8.4
+- **Frontend:** Vue 3.4 · Inertia.js 3 · TailwindCSS 4
+- **Infra:** Docker via Laravel Sail · Vite 8
 
-## Documentation
+## Setup
 
-See `.github/skills/` for the full engineering Skill documents:
+```bash
+# Clone & install
+git clone git@github.com:PabloEnrique/bus_run.git
+cd bus_run
 
-| Doc | Purpose |
-|-----|---------|
-| `01_Game_Design_Document.md` | Vehicle physics, fuel system, maps, progression |
-| `02_Web_Architecture_and_API.md` | Laravel/Vue/Inertia standards, DB schema, API |
-| `03_RealTime_Networking.md` | Colyseus server, state sync, prediction, anti-cheat |
-| `04_Git_Versioning_Standards.md` | Branching, Conventional Commits, CI |
-| `05_Master_Prompt_Instructions.md` | LLM Skill instructions |
+# Start containers
+./vendor/bin/sail up -d
+
+# Run migrations & seed
+./vendor/bin/sail artisan migrate
+./vendor/bin/sail artisan db:seed
+
+# Install frontend deps & dev server
+npm install
+npm run dev
+```
+
+App runs at **http://localhost**. Vite HMR at port 5173.
+
+## Game Features (In Progress)
+
+- **Auth:** Minimal name + password registration
+- **Garage:** Browse and inspect your bus collection with real specs
+- **Lobby:** *(coming soon)* Create/join race rooms
+- **Race:** *(coming soon)* Real-time multiplayer physics racing
+
+## Bus Catalog
+
+9 buses across 3 real-world models with authentic specs:
+
+| Model | Generations | Weight Range | Torque Range |
+|-------|------------|-------------|-------------|
+| Mitsubishi Rosa | BE4 / BE6 / BE7 | 3,250–3,650 kg | 285–530 Nm |
+| Toyota Coaster | B20 / B40-50 / B60-70 | 3,100–3,550 kg | 240–420 Nm |
+| Marcopolo Volare | A-Series / W-Series / Fly-V | 4,200–4,800 kg | 430–600 Nm |
+
+## Agentic Development
+
+Laravel's predictable structure and conventions make it ideal for AI coding agents like Claude Code, Cursor, and GitHub Copilot. Install [Laravel Boost](https://laravel.com/docs/ai) to supercharge your AI workflow:
+
+```bash
+composer require laravel/boost --dev
+
+php artisan boost:install
+```
+
+Boost provides your agent 15+ tools and skills that help agents build Laravel applications while following best practices.
+
+## Contributing
+
+Thank you for considering contributing to the Laravel framework! The contribution guide can be found in the [Laravel documentation](https://laravel.com/docs/contributions).
+
+## Code of Conduct
+
+In order to ensure that the Laravel community is welcoming to all, please review and abide by the [Code of Conduct](https://laravel.com/docs/contributions#code-of-conduct).
+
+## Security Vulnerabilities
+
+If you discover a security vulnerability within Laravel, please send an e-mail to Taylor Otwell via [taylor@laravel.com](mailto:taylor@laravel.com). All security vulnerabilities will be promptly addressed.
+
+## License
+
+The Laravel framework is open-sourced software licensed under the [MIT license](https://opensource.org/licenses/MIT).
