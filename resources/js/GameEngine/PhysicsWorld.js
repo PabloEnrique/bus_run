@@ -132,8 +132,8 @@ export class PhysicsWorld {
             collisionFilterMask: COLLISION_WALL | COLLISION_VEHICLE,
         });
         this.chassisBody.addShape(chassisShape);
-        // Spawn at origin, high enough to settle onto springs
-        this.chassisBody.position.set(0, 2.0, 0);
+        // Spawn at origin, just above equilibrium (~1.23) so springs engage immediately
+        this.chassisBody.position.set(0, 1.3, 0);
 
         const vehicle = new CANNON.RaycastVehicle({
             chassisBody: this.chassisBody,
@@ -143,19 +143,19 @@ export class PhysicsWorld {
         });
 
         // Shared wheel options — connection point Y = −0.5 (at chassis bottom).
-        // Ray length = restLength + radius = 0.4 + 0.35 = 0.75 m.
-        // At equilibrium the chassis floats at Y ≈ 1.1 with 0.12 m sag.
+        // Ray length = restLength + radius = 0.5 + 0.35 = 0.85 m.
+        // At equilibrium the chassis floats at Y ≈ 1.23 with 0.12 m sag.
         const sharedWheel = {
             radius: 0.35,
             directionLocal: new CANNON.Vec3(0, -1, 0),
             axleLocal: new CANNON.Vec3(-1, 0, 0),
             suspensionStiffness: stiffness,
-            suspensionRestLength: 0.4,
+            suspensionRestLength: 0.5,
             dampingRelaxation,
             dampingCompression,
             rollInfluence: 0.08,
             maxSuspensionForce: 50000,
-            maxSuspensionTravel: 0.25,
+            maxSuspensionTravel: 0.4,
             customSlidingRotationalSpeed: -30,
             useCustomSlidingRotationalSpeed: true,
         };

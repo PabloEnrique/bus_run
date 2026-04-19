@@ -192,9 +192,9 @@ function gameLoop() {
     // Sync visual
     scene.syncMeshToBody(playerMesh, physics.chassisBody, physics.wheelBodies);
 
-    // Respawn safety — if bus falls below track, reset to spawn
+    // Respawn safety — if bus falls below track, reset near equilibrium
     if (physics.chassisBody.position.y < -10) {
-        physics.chassisBody.position.set(0, 3.0, 0);
+        physics.chassisBody.position.set(0, 1.5, 0);
         physics.chassisBody.velocity.set(0, 0, 0);
         physics.chassisBody.angularVelocity.set(0, 0, 0);
         physics.chassisBody.quaternion.set(0, 0, 0, 1);
