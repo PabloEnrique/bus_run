@@ -23,5 +23,12 @@ export default defineConfig({
         watch: {
             ignored: ['**/storage/framework/views/**'],
         },
+        proxy: {
+            '/colyseus': {
+                target: 'ws://localhost:2567',
+                ws: true,
+                changeOrigin: true,
+            },
+        },
     },
 });
