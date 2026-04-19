@@ -5,10 +5,15 @@ import { PhysicsWorld } from '../../GameEngine/PhysicsWorld.js';
 import { SceneManager } from '../../GameEngine/SceneManager.js';
 import { NetworkManager } from '../../GameEngine/NetworkManager.js';
 import { Drivetrain } from '../../GameEngine/Drivetrain.js';
+import { getMapById, DEFAULT_MAP_ID } from '../../GameEngine/maps/index.js';
 
 const props = defineProps({
     bus: Object,
     userId: Number,
+    mapId: {
+        type: String,
+        default: null,
+    },
 });
 
 const user = computed(() => usePage().props?.auth?.user);
@@ -33,6 +38,7 @@ let playerMesh = null;
 let animFrame = null;
 let lastTime = 0;
 let _contactLogTimer = 0;
+let _mapConfig = null;
 
 // Input state
 const keys = { w: false, a: false, s: false, d: false };
@@ -90,7 +96,10 @@ async function initGame() {
         console.info('[Race] Step 1/5: Drivetrain OK — gears:', drivetrain.gearCount, 'torque:', drivetrain.peakTorque, 'Nm');
 
         console.info('[Race] Step 2/5: Creating physics world + vehicle...');
-        physics = new PhysicsWorld();
+        const mapConfig = getMapById(props.mapId || DEFAULT_MAP_ID);
+        _mapConfig = mapConfig;
+        console.info('[Race] Map:', mapConfig?.name || 'default');
+        physics = new PhysicsWorld(mapConfig);
         physics.createVehicle({
             base_weight_kg: props.bus.base_weight_kg,
             suspension_stiffness: props.bus.suspension_stiffness,
@@ -103,7 +112,7 @@ async function initGame() {
         console.info('[Race] Step 2/5: Physics OK — wheels:', physics.vehicle?.wheelInfos?.length, 'mass:', physics.chassisBody?.mass);
 
         console.info('[Race] Step 3/5: Creating 3D scene...');
-        scene = new SceneManager(canvasRef.value);
+        scene = new SceneManager(canvasRef.value, mapConfig);
         const color = hexToInt(props.bus.paint_hex);
         playerMesh = scene.createBusMesh(color, {
             length_m: props.bus.length_m,
@@ -219,9 +228,10 @@ function gameLoop() {
     // Sync visual
     scene.syncMeshToBody(playerMesh, physics.chassisBody, physics.wheelBodies);
 
-    // Respawn safety — if bus falls below track, reset near equilibrium
+    // Respawn safety — if bus falls below track, reset to map spawn
     if (physics.chassisBody.position.y < -10) {
-        physics.chassisBody.position.set(0, 1.5, 0);
+        const spawn = _mapConfig?.spawnPosition || [0, 1.5, 0];
+        physics.chassisBody.position.set(spawn[0], spawn[1], spawn[2]);
         physics.chassisBody.velocity.set(0, 0, 0);
         physics.chassisBody.angularVelocity.set(0, 0, 0);
         physics.chassisBody.quaternion.set(0, 0, 0, 1);
@@ -257,6 +267,10 @@ function gameLoop() {
 
 // RPM bar width for HUD (0–100%) — uses per-bus redline
 const busRedline = computed(() => props.bus?.redline_rpm || 3200);
+const currentMapName = computed(() => {
+    const mc = getMapById(props.mapId || DEFAULT_MAP_ID);
+    return mc?.name || 'Pista Libre';
+});
 const rpmPercent = computed(() => Math.min(100, (currentRPM.value / busRedline.value) * 100));
 const rpmColor = computed(() => {
     const warnThreshold = busRedline.value * 0.875;  // ~87.5%
@@ -401,6 +415,7 @@ onBeforeUnmount(() => {
                 <p class="text-amber-400">{{ bus?.model }}</p>
                 <p class="text-gray-500">{{ bus?.generation }}</p>
                 <p v-if="bus?.nickname" class="italic text-gray-600">"{{ bus.nickname }}"</p>
+                <p class="mt-1 text-cyan-400">{{ currentMapName }}</p>
             </div>
 
             <!-- Controls hint — bottom left -->

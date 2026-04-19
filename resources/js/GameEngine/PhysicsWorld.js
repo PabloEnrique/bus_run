@@ -33,7 +33,10 @@ const COLLISION_VEHICLE = 4;
  *  | tireMaterial | wallMaterial | 0.2      | 0.3         |
  */
 export class PhysicsWorld {
-    constructor() {
+    /**
+     * @param {object} [mapConfig] — map configuration from maps/*.js
+     */
+    constructor(mapConfig) {
         this.world = new CANNON.World();
         this.world.gravity.set(0, -9.82, 0);
         this.world.broadphase = new CANNON.SAPBroadphase(this.world);
@@ -69,20 +72,22 @@ export class PhysicsWorld {
             { friction: 0.1, restitution: 0.3 },
         ));
 
-        // ── Track geometry ───────────────────────────────────
-        this._createTrack();
+        // ── Track geometry from map config ───────────────────
+        this._mapConfig = mapConfig || null;
+        this._createTrack(mapConfig);
 
         this.vehicle = null;
         this.chassisBody = null;
     }
 
     /**
-     * Build a large flat driveway — a single ground plane at Y = 0
-     * with no walls or obstacles.
+     * Build the ground plane + walls/buildings from map config.
+     * Falls back to a bare ground plane if no config is provided.
+     * @param {object} [mapConfig]
      * @private
      */
-    _createTrack() {
-        // Large flat ground plane at Y = 0
+    _createTrack(mapConfig) {
+        // Ground plane at Y = 0 (all maps share the same flat ground)
         const ground = new CANNON.Body({
             mass: 0,
             shape: new CANNON.Plane(),
@@ -92,6 +97,40 @@ export class PhysicsWorld {
         ground.quaternion.setFromEuler(-Math.PI / 2, 0, 0);
         ground.position.set(0, 0, 0);
         this.world.addBody(ground);
+
+        if (!mapConfig) return;
+
+        // ── Walls — solid barriers the bus cannot pass through ─
+        if (mapConfig.walls) {
+            for (const wall of mapConfig.walls) {
+                const [hx, hy, hz] = wall.size;
+                const [px, py, pz] = wall.position;
+                const body = new CANNON.Body({
+                    mass: 0,
+                    shape: new CANNON.Box(new CANNON.Vec3(hx, hy, hz)),
+                    material: this.wallMaterial,
+                    collisionFilterGroup: COLLISION_WALL,
+                });
+                body.position.set(px, py, pz);
+                this.world.addBody(body);
+            }
+        }
+
+        // ── Buildings — solid collision bodies ───────────────
+        if (mapConfig.buildings) {
+            for (const bldg of mapConfig.buildings) {
+                const [w, h, d] = bldg.size;
+                const [px, py, pz] = bldg.position;
+                const body = new CANNON.Body({
+                    mass: 0,
+                    shape: new CANNON.Box(new CANNON.Vec3(w / 2, h / 2, d / 2)),
+                    material: this.wallMaterial,
+                    collisionFilterGroup: COLLISION_WALL,
+                });
+                body.position.set(px, py, pz);
+                this.world.addBody(body);
+            }
+        }
     }
 
     /**
@@ -136,7 +175,12 @@ export class PhysicsWorld {
             collisionFilterMask: COLLISION_GROUND | COLLISION_WALL | COLLISION_VEHICLE,
         });
         this.chassisBody.addShape(chassisShape);
-        this.chassisBody.position.set(0, 1.3, 0);
+        // Spawn position from map config, or default origin
+        const spawn = this._mapConfig?.spawnPosition || [0, 1.3, 0];
+        this.chassisBody.position.set(spawn[0], spawn[1], spawn[2]);
+        if (this._mapConfig?.spawnRotation) {
+            this.chassisBody.quaternion.setFromEuler(0, this._mapConfig.spawnRotation, 0);
+        }
 
         const vehicle = new CANNON.RaycastVehicle({
             chassisBody: this.chassisBody,

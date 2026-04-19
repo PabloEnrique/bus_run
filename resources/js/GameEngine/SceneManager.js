@@ -1,38 +1,46 @@
 import * as THREE from 'three';
 
 export class SceneManager {
-    constructor(canvas) {
+    /**
+     * @param {HTMLCanvasElement} canvas
+     * @param {object} [mapConfig] — map configuration from maps/*.js
+     */
+    constructor(canvas, mapConfig) {
         this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
         this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
         this.renderer.setSize(window.innerWidth, window.innerHeight);
         this.renderer.shadowMap.enabled = true;
         this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
 
+        const skyColor = mapConfig?.skyColor ?? 0x87ceeb;
+        const fogNear  = mapConfig?.fogNear  ?? 200;
+        const fogFar   = mapConfig?.fogFar   ?? 600;
+
         this.scene = new THREE.Scene();
-        this.scene.background = new THREE.Color(0x87ceeb);
-        this.scene.fog = new THREE.Fog(0x87ceeb, 200, 600);
+        this.scene.background = new THREE.Color(skyColor);
+        this.scene.fog = new THREE.Fog(skyColor, fogNear, fogFar);
 
         // Camera
-        this.camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 800);
+        this.camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 1000);
         this.camera.position.set(0, 5, -8);
 
-        // Lights
-        const ambient = new THREE.AmbientLight(0xffffff, 0.6);
+        // Lights — intensity from map config
+        const ambient = new THREE.AmbientLight(0xffffff, mapConfig?.ambientIntensity ?? 0.6);
         this.scene.add(ambient);
 
-        const sun = new THREE.DirectionalLight(0xffffff, 1.2);
+        const sun = new THREE.DirectionalLight(0xffffff, mapConfig?.sunIntensity ?? 1.2);
         sun.position.set(50, 80, 30);
         sun.castShadow = true;
         sun.shadow.mapSize.set(2048, 2048);
-        sun.shadow.camera.left = -100;
-        sun.shadow.camera.right = 100;
-        sun.shadow.camera.top = 100;
-        sun.shadow.camera.bottom = -100;
-        sun.shadow.camera.far = 250;
+        sun.shadow.camera.left = -200;
+        sun.shadow.camera.right = 200;
+        sun.shadow.camera.top = 200;
+        sun.shadow.camera.bottom = -200;
+        sun.shadow.camera.far = 500;
         this.scene.add(sun);
 
-        // Build track visuals
-        this._createTrackVisuals();
+        // Build scene from map config
+        this._buildScene(mapConfig);
 
         // Remote players map — { mesh, targetPos, targetRotY }
         this.remotePlayers = new Map();
@@ -46,40 +54,141 @@ export class SceneManager {
     }
 
     // ─────────────────────────────────────────────────────────
-    //  Track visuals
+    //  Scene construction from map config
     // ─────────────────────────────────────────────────────────
 
-    _createTrackVisuals() {
-        // Materials
-        const asphalt = new THREE.MeshStandardMaterial({ color: 0x333333, roughness: 0.9 });
+    /**
+     * Build the 3D environment from a map configuration.
+     * Creates ground, grass, buildings, walls, lane markings, street lights.
+     * @param {object} [mapConfig]
+     * @private
+     */
+    _buildScene(mapConfig) {
+        const groundSize  = mapConfig?.groundSize  ?? 400;
+        const groundColor = mapConfig?.groundColor ?? 0x333333;
+
+        // Shared materials
+        const asphalt  = new THREE.MeshStandardMaterial({ color: groundColor, roughness: 0.9 });
         const grassMat = new THREE.MeshStandardMaterial({ color: 0x2d5a1e, roughness: 0.95 });
         const lineMat  = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.8 });
+        const wallMat  = new THREE.MeshStandardMaterial({ color: 0x888888, roughness: 0.7 });
 
-        // ── Large flat asphalt plane ─────────────────────────
-        const roadGeo = new THREE.PlaneGeometry(400, 400);
+        // ── Ground plane ─────────────────────────────────────
+        const roadGeo = new THREE.PlaneGeometry(groundSize, groundSize);
         const road = new THREE.Mesh(roadGeo, asphalt);
         road.rotation.x = -Math.PI / 2;
         road.position.y = 0;
         road.receiveShadow = true;
         this.scene.add(road);
 
-        // ── Grass fringe beyond the asphalt ──────────────────
-        const grassGeo = new THREE.PlaneGeometry(1000, 1000);
+        // ── Grass beyond the asphalt ─────────────────────────
+        const grassSize = groundSize * 3;
+        const grassGeo = new THREE.PlaneGeometry(grassSize, grassSize);
         const grass = new THREE.Mesh(grassGeo, grassMat);
         grass.rotation.x = -Math.PI / 2;
         grass.position.y = -0.01;
         grass.receiveShadow = true;
         this.scene.add(grass);
 
-        // ── Lane markings (white dashed center line along Z) ─
-        for (let z = -180; z <= 180; z += 8) {
-            const dash = new THREE.Mesh(
-                new THREE.BoxGeometry(0.15, 0.02, 3),
-                lineMat,
-            );
-            dash.position.set(0, 0.005, z);
-            dash.receiveShadow = true;
-            this.scene.add(dash);
+        if (!mapConfig) {
+            // Fallback: simple dashed center line (legacy behaviour)
+            for (let z = -180; z <= 180; z += 8) {
+                const dash = new THREE.Mesh(
+                    new THREE.BoxGeometry(0.15, 0.02, 3), lineMat,
+                );
+                dash.position.set(0, 0.005, z);
+                this.scene.add(dash);
+            }
+            return;
+        }
+
+        // ── Walls (visual representation) ────────────────────
+        if (mapConfig.walls) {
+            for (const wall of mapConfig.walls) {
+                const [hx, hy, hz] = wall.size;
+                const [px, py, pz] = wall.position;
+                const geo = new THREE.BoxGeometry(hx * 2, hy * 2, hz * 2);
+                const mesh = new THREE.Mesh(geo, wallMat);
+                mesh.position.set(px, py, pz);
+                mesh.castShadow = true;
+                mesh.receiveShadow = true;
+                this.scene.add(mesh);
+            }
+        }
+
+        // ── Buildings ────────────────────────────────────────
+        if (mapConfig.buildings) {
+            for (const bldg of mapConfig.buildings) {
+                const [w, h, d] = bldg.size;
+                const [px, py, pz] = bldg.position;
+                const mat = new THREE.MeshStandardMaterial({
+                    color: bldg.color || 0x888888,
+                    roughness: 0.8,
+                });
+                const geo = new THREE.BoxGeometry(w, h, d);
+                const mesh = new THREE.Mesh(geo, mat);
+                mesh.position.set(px, py, pz);
+                mesh.castShadow = true;
+                mesh.receiveShadow = true;
+                this.scene.add(mesh);
+            }
+        }
+
+        // ── Lane markings (dashed white lines) ───────────────
+        if (mapConfig.laneMarkings) {
+            for (const line of mapConfig.laneMarkings) {
+                if (line.axis === 'z') {
+                    for (let z = line.zStart; z <= line.zEnd; z += 8) {
+                        const dash = new THREE.Mesh(
+                            new THREE.BoxGeometry(0.15, 0.02, 3), lineMat,
+                        );
+                        dash.position.set(line.x, 0.005, z);
+                        this.scene.add(dash);
+                    }
+                } else {
+                    for (let x = line.xStart; x <= line.xEnd; x += 8) {
+                        const dash = new THREE.Mesh(
+                            new THREE.BoxGeometry(3, 0.02, 0.15), lineMat,
+                        );
+                        dash.position.set(x, 0.005, line.z);
+                        this.scene.add(dash);
+                    }
+                }
+            }
+        }
+
+        // ── Street lights (pole + lamp) ──────────────────────
+        if (mapConfig.streetLights) {
+            const poleMat = new THREE.MeshStandardMaterial({ color: 0x555555, roughness: 0.6 });
+            const lampMat = new THREE.MeshStandardMaterial({
+                color: 0xffffcc, emissive: 0xffffaa, emissiveIntensity: 0.3,
+            });
+            for (const [lx, lz] of mapConfig.streetLights) {
+                // Pole
+                const poleGeo = new THREE.CylinderGeometry(0.08, 0.08, 6, 8);
+                const pole = new THREE.Mesh(poleGeo, poleMat);
+                pole.position.set(lx, 3, lz);
+                pole.castShadow = true;
+                this.scene.add(pole);
+                // Lamp head
+                const lampGeo = new THREE.SphereGeometry(0.25, 8, 8);
+                const lamp = new THREE.Mesh(lampGeo, lampMat);
+                lamp.position.set(lx, 6.1, lz);
+                this.scene.add(lamp);
+            }
+        }
+
+        // ── Distance markers (highway) ───────────────────────
+        if (mapConfig.distanceMarkers) {
+            const markerMat = new THREE.MeshStandardMaterial({ color: 0x22aa44, roughness: 0.6 });
+            for (const marker of mapConfig.distanceMarkers) {
+                const [mx, mz] = marker.position;
+                // Green post
+                const geo = new THREE.BoxGeometry(0.6, 1.2, 0.15);
+                const mesh = new THREE.Mesh(geo, markerMat);
+                mesh.position.set(mx, 0.6, mz);
+                this.scene.add(mesh);
+            }
         }
     }
 
