@@ -67,6 +67,7 @@ async function initGame() {
         return;
     }
 
+    // ── Local init (MUST succeed — no network dependency) ────────
     try {
         // Drivetrain
         drivetrain = new Drivetrain({
@@ -90,34 +91,11 @@ async function initGame() {
         const color = hexToInt(props.bus.paint_hex);
         playerMesh = scene.createBusMesh(color);
 
-        // Network (connection failure is non-fatal — game runs offline)
-        network = new NetworkManager('ws://localhost:2567');
-        network.onPlayerJoin((sessionId) => {
-            scene.addRemotePlayer(sessionId, 0x4488ff);
-        });
-        network.onPlayerUpdate((sessionId, pos) => {
-            scene.updateRemotePlayer(sessionId, pos);
-        });
-        network.onPlayerLeave((sessionId) => {
-            scene.removeRemotePlayer(sessionId);
-        });
-
-        try {
-            await network.joinRace({
-                userId: props.userId,
-                torque: props.bus.engine_torque_nm,
-                weight: props.bus.base_weight_kg,
-            });
-            connected.value = true;
-        } catch (err) {
-            console.warn('[Race] Could not connect to game server:', err.message);
-        }
-
         // Input
         window.addEventListener('keydown', onKeyDown);
         window.addEventListener('keyup', onKeyUp);
 
-        // Start loop
+        // Start game loop — runs even without network
         isLoading.value = false;
         lastTime = performance.now();
         gameLoop();
@@ -125,6 +103,30 @@ async function initGame() {
         console.error('[Race] Failed to initialise game:', err);
         initError.value = err.message || 'Error desconocido';
         isLoading.value = false;
+        return;
+    }
+
+    // ── Network (non-fatal — game runs offline) ─────────────────
+    try {
+        network = new NetworkManager('ws://localhost:2567');
+        network.onPlayerJoin((sessionId) => {
+            scene?.addRemotePlayer(sessionId, 0x4488ff);
+        });
+        network.onPlayerUpdate((sessionId, pos) => {
+            scene?.updateRemotePlayer(sessionId, pos);
+        });
+        network.onPlayerLeave((sessionId) => {
+            scene?.removeRemotePlayer(sessionId);
+        });
+
+        await network.joinRace({
+            userId: props.userId,
+            torque: props.bus.engine_torque_nm,
+            weight: props.bus.base_weight_kg,
+        });
+        connected.value = true;
+    } catch (err) {
+        console.warn('[Race] Could not connect to game server:', err?.message);
     }
 }
 

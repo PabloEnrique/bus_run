@@ -198,6 +198,7 @@ export class PhysicsWorld {
         vehicle.addWheel({ ...rearWheel,  chassisConnectionPointLocal: new CANNON.Vec3( 1.0, -0.65, -1.2) });
 
         vehicle.addToWorld(this.world);
+        console.log('[Physics] Wheels created:', vehicle.wheelInfos.length);
 
         // Kinematic wheel bodies for visual sync
         this.wheelBodies = vehicle.wheelInfos.map((wheel) => {
