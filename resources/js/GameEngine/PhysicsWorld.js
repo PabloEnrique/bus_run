@@ -97,33 +97,36 @@ export class PhysicsWorld {
     /**
      * Create a RaycastVehicle from bus catalog specs.
      *
-     * Front wheels use lower frictionSlip (1.8) for natural understeer;
-     * rear wheels use higher frictionSlip (3.0) for a stable rear axle.
+     * Chassis box, wheel positions, and suspension are derived from the
+     * per-bus dimensions provided by the server.
      *
-     * @param {{ base_weight_kg: number, suspension_stiffness: number }} busSpecs
+     * @param {object} busSpecs
      * @returns {CANNON.RaycastVehicle}
      */
     createVehicle(busSpecs) {
         const mass = busSpecs.base_weight_kg || 3500;
 
+        // ── Dimensions from specs ────────────────────────────
+        const length     = busSpecs.length_m    || 6.0;
+        const width      = busSpecs.width_m     || 2.0;
+        const height     = busSpecs.height_m    || 2.6;
+        const wheelbase  = busSpecs.wheelbase_m || 3.5;
+        const axleTrack  = busSpecs.axle_track_m || 1.6;
+
+        // Chassis half-extents (cannon-es Box takes half-sizes)
+        const halfW = width  / 2;
+        const halfH = height / 4;   // visual half of lower body
+        const halfL = length / 2;
+
         // cannon-es suspensionForce = (stiffness × displacement − damping × velocity) × chassisMass.
-        // The stiffness is a NORMALISED coefficient (not N/m) — it gets multiplied by mass.
-        // Static sag = g / (4 × stiffness).  Target sag ≈ 0.12 m → stiffness ≈ 20.
-        // Natural freq = sqrt(4 × k) / 2π ≈ 1.4 Hz — realistic for a city bus.
         const stiffness = 20;
 
         // Damping — ζ ≈ 0.6 (heavily damped like a loaded bus).
-        // Critical = 2 × sqrt(4 × stiffness) ≈ 18.
-        // Compression moderate, relaxation near-critical to kill rebound.
         const dampingCompression = 8.0;
         const dampingRelaxation  = 14.0;
 
         // Chassis — collides with GROUND + WALL + other VEHICLES.
-        // Ground collision acts as a hard safety net: if springs ever max out,
-        // the chassis physically rests on the surface instead of falling through.
-        // chassisMaterial ↔ trackMaterial has friction 0.01, restitution 0.0 —
-        // so it slides without dragging or bouncing.
-        const chassisShape = new CANNON.Box(new CANNON.Vec3(1.0, 0.5, 2.0));
+        const chassisShape = new CANNON.Box(new CANNON.Vec3(halfW, halfH, halfL));
         this.chassisBody = new CANNON.Body({
             mass,
             material: this.chassisMaterial,
@@ -133,7 +136,6 @@ export class PhysicsWorld {
             collisionFilterMask: COLLISION_GROUND | COLLISION_WALL | COLLISION_VEHICLE,
         });
         this.chassisBody.addShape(chassisShape);
-        // Spawn at origin, just above equilibrium (~1.23) so springs engage immediately
         this.chassisBody.position.set(0, 1.3, 0);
 
         const vehicle = new CANNON.RaycastVehicle({
@@ -143,11 +145,17 @@ export class PhysicsWorld {
             indexForwardAxis: 2,
         });
 
-        // Shared wheel options — connection point Y = −0.5 (at chassis bottom).
-        // Ray length = restLength + radius = 0.5 + 0.35 = 0.85 m.
-        // At equilibrium the chassis floats at Y ≈ 1.23 with 0.12 m sag.
+        // Wheel radius scales slightly with bus size
+        const wheelRadius = 0.30 + (height - 2.5) * 0.1;  // ~0.31–0.35
+        const connectionY = -halfH;
+
+        // Wheel connection points derived from wheelbase + axle track
+        const frontZ =  wheelbase / 2;
+        const rearZ  = -wheelbase / 2;
+        const sideX  =  axleTrack / 2;
+
         const sharedWheel = {
-            radius: 0.35,
+            radius: wheelRadius,
             directionLocal: new CANNON.Vec3(0, -1, 0),
             axleLocal: new CANNON.Vec3(-1, 0, 0),
             suspensionStiffness: stiffness,
@@ -161,15 +169,15 @@ export class PhysicsWorld {
             useCustomSlidingRotationalSpeed: true,
         };
 
-        // Front wheels — lower frictionSlip → break traction sooner → understeer
+        // Front wheels — lower frictionSlip → understeer
         const frontWheel = { ...sharedWheel, frictionSlip: 1.8 };
-        // Rear wheels — higher frictionSlip → hold traction → stable rear
+        // Rear wheels — higher frictionSlip → stable rear
         const rearWheel  = { ...sharedWheel, frictionSlip: 3.0 };
 
-        vehicle.addWheel({ ...frontWheel, chassisConnectionPointLocal: new CANNON.Vec3(-1.0, -0.5, 1.5) });
-        vehicle.addWheel({ ...frontWheel, chassisConnectionPointLocal: new CANNON.Vec3( 1.0, -0.5, 1.5) });
-        vehicle.addWheel({ ...rearWheel,  chassisConnectionPointLocal: new CANNON.Vec3(-1.0, -0.5, -1.2) });
-        vehicle.addWheel({ ...rearWheel,  chassisConnectionPointLocal: new CANNON.Vec3( 1.0, -0.5, -1.2) });
+        vehicle.addWheel({ ...frontWheel, chassisConnectionPointLocal: new CANNON.Vec3(-sideX, connectionY, frontZ) });
+        vehicle.addWheel({ ...frontWheel, chassisConnectionPointLocal: new CANNON.Vec3( sideX, connectionY, frontZ) });
+        vehicle.addWheel({ ...rearWheel,  chassisConnectionPointLocal: new CANNON.Vec3(-sideX, connectionY, rearZ) });
+        vehicle.addWheel({ ...rearWheel,  chassisConnectionPointLocal: new CANNON.Vec3( sideX, connectionY, rearZ) });
 
         vehicle.addToWorld(this.world);
         console.log('[Physics] Wheels created:', vehicle.wheelInfos.length);

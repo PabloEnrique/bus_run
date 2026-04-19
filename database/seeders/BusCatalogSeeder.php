@@ -30,6 +30,16 @@ class BusCatalogSeeder extends Seeder
                         'fuel_capacity_liters' => $gen['fuel_capacity_liters'],
                         'suspension_stiffness' => $gen['suspension_stiffness'],
                         'gear_ratios' => $gen['gear_ratios'],
+                        'length_m' => $gen['length_m'] ?? 6.00,
+                        'width_m' => $gen['width_m'] ?? 2.00,
+                        'height_m' => $gen['height_m'] ?? 2.60,
+                        'wheelbase_m' => $gen['wheelbase_m'] ?? 3.50,
+                        'axle_track_m' => $gen['axle_track_m'] ?? 1.60,
+                        'engine_hp' => $gen['engine_hp'] ?? 150,
+                        'redline_rpm' => $gen['redline_rpm'] ?? 3200,
+                        'peak_torque_rpm_low' => $gen['peak_torque_rpm_low'] ?? 1800,
+                        'peak_torque_rpm_high' => $gen['peak_torque_rpm_high'] ?? 2500,
+                        'drag_coefficient' => $gen['drag_coefficient'] ?? 0.70,
                     ]
                 );
 

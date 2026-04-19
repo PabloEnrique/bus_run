@@ -19,6 +19,16 @@ class BusCatalog extends Model
         'fuel_capacity_liters',
         'suspension_stiffness',
         'gear_ratios',
+        'length_m',
+        'width_m',
+        'height_m',
+        'wheelbase_m',
+        'axle_track_m',
+        'engine_hp',
+        'redline_rpm',
+        'peak_torque_rpm_low',
+        'peak_torque_rpm_high',
+        'drag_coefficient',
         'thumbnail_url',
     ];
 
@@ -30,6 +40,16 @@ class BusCatalog extends Model
             'fuel_capacity_liters' => 'integer',
             'suspension_stiffness' => 'float',
             'gear_ratios' => 'array',
+            'length_m' => 'float',
+            'width_m' => 'float',
+            'height_m' => 'float',
+            'wheelbase_m' => 'float',
+            'axle_track_m' => 'float',
+            'engine_hp' => 'integer',
+            'redline_rpm' => 'integer',
+            'peak_torque_rpm_low' => 'integer',
+            'peak_torque_rpm_high' => 'integer',
+            'drag_coefficient' => 'float',
         ];
     }
 

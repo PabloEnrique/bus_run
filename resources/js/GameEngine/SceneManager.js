@@ -83,33 +83,58 @@ export class SceneManager {
         }
     }
 
-    createBusMesh(color = 0xffb300) {
+    /**
+     * Create a bus mesh sized according to bus specs.
+     * @param {number} color — hex color
+     * @param {object} [busSpecs] — bus catalog data with dimension fields
+     * @returns {THREE.Group}
+     */
+    createBusMesh(color = 0xffb300, busSpecs = {}) {
         const group = new THREE.Group();
 
-        // Chassis (bus body)
-        const chassisGeo = new THREE.BoxGeometry(2.0, 1.0, 4.0);
+        // Dimensions from specs (or sensible defaults)
+        const length    = busSpecs.length_m     || 6.0;
+        const width     = busSpecs.width_m      || 2.0;
+        const height    = busSpecs.height_m     || 2.6;
+        const wheelbase = busSpecs.wheelbase_m  || 3.5;
+        const axleTrack = busSpecs.axle_track_m || 1.6;
+
+        // Chassis body — lower half of the bus
+        const bodyH = height / 2;
+        const chassisGeo = new THREE.BoxGeometry(width, bodyH, length);
         const chassisMat = new THREE.MeshStandardMaterial({ color, roughness: 0.5, metalness: 0.3 });
         const chassis = new THREE.Mesh(chassisGeo, chassisMat);
         chassis.castShadow = true;
         group.add(chassis);
 
-        // Roof (slightly smaller, on top)
-        const roofGeo = new THREE.BoxGeometry(1.8, 0.5, 3.2);
+        // Roof — slightly narrower/shorter, sits on top
+        const roofW = width * 0.9;
+        const roofH = height * 0.19;
+        const roofL = length * 0.85;
+        const roofGeo = new THREE.BoxGeometry(roofW, roofH, roofL);
         const roofMat = new THREE.MeshStandardMaterial({ color: 0xeeeeee, roughness: 0.6 });
         const roof = new THREE.Mesh(roofGeo, roofMat);
-        roof.position.y = 0.75;
+        roof.position.y = bodyH / 2 + roofH / 2;
         roof.castShadow = true;
         group.add(roof);
 
+        // Wheel radius scales with bus height (matches physics)
+        const wheelRadius = 0.30 + (height - 2.5) * 0.1;
+
         // Wheels
-        const wheelGeo = new THREE.CylinderGeometry(0.35, 0.35, 0.2, 16);
+        const wheelGeo = new THREE.CylinderGeometry(wheelRadius, wheelRadius, 0.2, 16);
         const wheelMat = new THREE.MeshStandardMaterial({ color: 0x222222, roughness: 0.8 });
 
+        const frontZ  =  wheelbase / 2;
+        const rearZ   = -wheelbase / 2;
+        const sideX   =  axleTrack / 2;
+        const wheelY  = -(height / 4);   // bottom of chassis box
+
         const wheelPositions = [
-            [-1.0, -0.5, 1.5],
-            [1.0, -0.5, 1.5],
-            [-1.0, -0.5, -1.2],
-            [1.0, -0.5, -1.2],
+            [-sideX, wheelY, frontZ],
+            [ sideX, wheelY, frontZ],
+            [-sideX, wheelY, rearZ],
+            [ sideX, wheelY, rearZ],
         ];
 
         group.wheels = [];

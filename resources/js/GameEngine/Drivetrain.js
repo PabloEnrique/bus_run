@@ -1,178 +1,165 @@
 /**
  * @module Drivetrain
- * Drivetrain simulation — RPM with engine inertia, torque curve, gear shifting,
- * fuel consumption.
+ * Drivetrain simulation — per-bus powerband, RPM with engine inertia,
+ * torque curve, gear shifting, aerodynamic drag, rolling resistance,
+ * and fuel consumption.
  *
- * ## RPM Inertia Model
- * Instead of snapping RPM to wheel-derived speed (which stays at IDLE when
- * stationary, producing only 40 % torque), RPM now **lerps** toward a target:
+ * ## Per-Bus Powerband
+ * Each bus defines its own `redline_rpm`, `peak_torque_rpm_low`,
+ * `peak_torque_rpm_high`, and `engine_hp`. The torque curve shape is
+ * the same but shifts according to these per-bus values.
  *
- *   targetRPM = max(wheelDerivedRPM, throttleTargetRPM)
- *   rpm += (targetRPM − rpm) × min(1, ENGINE_INERTIA × dt)
+ * ## Aerodynamic Drag
+ * `F_drag = 0.5 × ρ × Cd × A × v²` where:
+ * - ρ = 1.225 kg/m³ (air density at sea level)
+ * - Cd = drag_coefficient from bus specs (includes frontal area)
+ * - v = vehicle speed in m/s
+ * Top speed emerges naturally when drag + rolling resistance = engine force.
  *
- * `throttleTargetRPM` simulates the engine revving before the wheels catch up
- * (clutch engagement). This lets the bus produce strong launch force from a
- * standstill. `ENGINE_INERTIA` (5.0 s⁻¹) means RPM reaches ~95 % of target
- * in ≈ 0.6 s — responsive but not instant.
- *
- * ## Diesel Torque Curve
- * Normalised multiplier 0.3–1.0 peaking as a plateau between 1 800–2 500 RPM,
- * ramping from 0.4 at idle (800) and tapering to 0.3 at redline (3 200).
- *
- * ## Fuel Consumption
- * Proportional to `(RPM / REDLINE) × throttle × peakTorque`.
+ * ## Rolling Resistance
+ * `F_roll = Crr × mass × g` (constant force opposing motion)
  */
 
 /** @constant {number} Engine idle speed in RPM */
 const IDLE_RPM = 800;
-/** @constant {number} Engine rev limiter in RPM */
-const REDLINE_RPM = 3200;
-/** @constant {number} Start of peak torque plateau (RPM) */
-const PEAK_TORQUE_RPM_LOW = 1800;
-/** @constant {number} End of peak torque plateau (RPM) */
-const PEAK_TORQUE_RPM_HIGH = 2500;
+/** @constant {number} Default redline */
+const DEFAULT_REDLINE_RPM = 3200;
 /** @constant {number} Final-drive (differential) ratio */
 const FINAL_DRIVE_RATIO = 4.1;
 /** @constant {number} Tyre rolling radius in metres — must match PhysicsWorld */
 const WHEEL_RADIUS = 0.35;
 /** @constant {number} Base fuel consumption rate (L / s / load-unit) */
 const FUEL_RATE_BASE = 0.00008;
-/**
- * @constant {number} Engine inertia factor (s⁻¹).
- * Controls how quickly RPM approaches its target.
- * Higher = faster response; 5.0 ≈ 95 % in 0.6 s.
- */
+/** @constant {number} Engine inertia factor (s⁻¹) */
 const ENGINE_INERTIA = 5.0;
+/** @constant {number} Air density at sea level (kg/m³) */
+const AIR_DENSITY = 1.225;
+/** @constant {number} Rolling resistance coefficient (asphalt) */
+const ROLLING_RESISTANCE_COEFF = 0.012;
+/** @constant {number} Gravity (m/s²) */
+const GRAVITY = 9.82;
 
 export class Drivetrain {
     /**
      * @param {object} specs — bus catalog specs from the server
-     * @param {number} specs.engine_torque_nm  — peak torque in Nm
-     * @param {object} specs.gear_ratios       — e.g. { "1": 5.18, "2": 2.86, …, "R": 5.18 }
+     * @param {number} specs.engine_torque_nm
+     * @param {number} [specs.engine_hp]
+     * @param {number} [specs.redline_rpm]
+     * @param {number} [specs.peak_torque_rpm_low]
+     * @param {number} [specs.peak_torque_rpm_high]
+     * @param {object} specs.gear_ratios
      * @param {number} specs.fuel_capacity_liters
-     * @param {number} specs.current_fuel_liters
+     * @param {number} [specs.current_fuel_liters]
+     * @param {number} [specs.base_weight_kg]
+     * @param {number} [specs.drag_coefficient]
+     * @param {number} [specs.width_m]
+     * @param {number} [specs.height_m]
      */
     constructor(specs) {
         specs = specs || {};
-        /** @type {number} Peak engine torque (Nm) */
-        this.peakTorque = Number(specs.engine_torque_nm) || 400;
 
-        // Parse gear ratios — forward gears sorted numerically, reverse separate
+        // ── Per-bus powerband ────────────────────────────────
+        this.peakTorque       = Number(specs.engine_torque_nm)     || 400;
+        this.engineHP         = Number(specs.engine_hp)            || 150;
+        this.redlineRPM       = Number(specs.redline_rpm)          || DEFAULT_REDLINE_RPM;
+        this.peakTorqueRPMLow = Number(specs.peak_torque_rpm_low)  || 1800;
+        this.peakTorqueRPMHigh= Number(specs.peak_torque_rpm_high) || 2500;
+
+        // ── Drag model ───────────────────────────────────────
+        // drag_coefficient from specs is Cd (pure). Frontal area ≈ width × height × 0.85
+        const busWidth  = Number(specs.width_m)  || 2.0;
+        const busHeight = Number(specs.height_m) || 2.6;
+        const Cd = Number(specs.drag_coefficient) || 0.70;
+        const frontalArea = busWidth * busHeight * 0.85;
+        /** @type {number} Precomputed 0.5 × ρ × Cd × A for drag force calc */
+        this.dragFactor = 0.5 * AIR_DENSITY * Cd * frontalArea;
+
+        // ── Rolling resistance ────────────────────────────────
+        const mass = Number(specs.base_weight_kg) || 3500;
+        /** @type {number} Constant rolling resistance force in N */
+        this.rollingResistance = ROLLING_RESISTANCE_COEFF * mass * GRAVITY;
+
+        // Parse gear ratios
         const ratios = specs.gear_ratios || {};
-        /** @type {number[]} Forward gear ratios sorted 1st → 6th */
         this.forwardGears = Object.entries(ratios)
             .filter(([k]) => k !== 'R')
             .sort(([a], [b]) => Number(a) - Number(b))
             .map(([, v]) => Number(v));
-        /** @type {number} Reverse gear ratio */
         this.reverseRatio = Number(ratios['R']) || this.forwardGears[0] || 4.0;
 
-        /** @type {number} Current gear: -1 = R, 0 = N, 1–6 = forward */
         this.currentGear = 1;
-        /** @type {number} Current engine RPM (smoothed via inertia) */
         this.rpm = IDLE_RPM;
-        /** @type {number} Throttle position 0..1 */
         this.throttle = 0;
-        /** @type {boolean} Whether the brake is engaged */
         this.braking = false;
 
-        /** @type {number} Fuel tank capacity in litres */
         this.fuelCapacity = specs.fuel_capacity_liters || 100;
-        /** @type {number} Current fuel level in litres */
         this.fuel = specs.current_fuel_liters ?? this.fuelCapacity;
     }
 
-    /** @returns {number} Number of forward gears available */
-    get gearCount() {
-        return this.forwardGears.length;
-    }
+    get gearCount() { return this.forwardGears.length; }
 
-    /**
-     * Current gear ratio (forward, reverse, or 0 for neutral).
-     * @returns {number}
-     */
     get currentRatio() {
         if (this.currentGear > 0 && this.currentGear <= this.forwardGears.length) {
             return this.forwardGears[this.currentGear - 1];
         }
         if (this.currentGear === -1) return this.reverseRatio;
-        return 0; // neutral
+        return 0;
     }
 
-    /**
-     * Gear label for HUD display.
-     * @returns {string} "R", "N", or "1"–"6"
-     */
     get gearLabel() {
         if (this.currentGear === -1) return 'R';
         if (this.currentGear === 0) return 'N';
         return String(this.currentGear);
     }
 
-    /** @returns {boolean} True while fuel remains */
-    get hasFuel() {
-        return this.fuel > 0;
-    }
+    get hasFuel() { return this.fuel > 0; }
 
     /**
-     * Diesel torque curve — normalised multiplier (0.3 – 1.0).
-     *
-     * ```
-     *  1.0 ┤         ┌────────┐
-     *      │        /          \
-     *  0.4 ├───────/            \
-     *  0.3 ├                     ──── (redline)
-     *      └──┬───┬──┬────────┬──┬──
-     *        800 1800       2500 3200  RPM
-     * ```
-     *
-     * @param {number} rpm — engine speed
-     * @returns {number} Multiplier 0.3–1.0
+     * Diesel torque curve — normalised multiplier (0.3–1.0).
+     * Uses per-bus RPM breakpoints.
      */
     torqueCurve(rpm) {
         if (rpm <= IDLE_RPM) return 0.4;
-        if (rpm >= REDLINE_RPM) return 0.3;
-        if (rpm >= PEAK_TORQUE_RPM_LOW && rpm <= PEAK_TORQUE_RPM_HIGH) return 1.0;
+        if (rpm >= this.redlineRPM) return 0.3;
+        if (rpm >= this.peakTorqueRPMLow && rpm <= this.peakTorqueRPMHigh) return 1.0;
 
-        if (rpm < PEAK_TORQUE_RPM_LOW) {
-            const t = (rpm - IDLE_RPM) / (PEAK_TORQUE_RPM_LOW - IDLE_RPM);
+        if (rpm < this.peakTorqueRPMLow) {
+            const t = (rpm - IDLE_RPM) / (this.peakTorqueRPMLow - IDLE_RPM);
             return 0.4 + t * 0.6;
         }
-        const t = (rpm - PEAK_TORQUE_RPM_HIGH) / (REDLINE_RPM - PEAK_TORQUE_RPM_HIGH);
+        const t = (rpm - this.peakTorqueRPMHigh) / (this.redlineRPM - this.peakTorqueRPMHigh);
         return 1.0 - t * 0.7;
     }
 
-    /**
-     * Derive RPM from rear wheel angular speed via gear + final-drive ratios.
-     *
-     * Formula: `RPM = (wheelSpeed × gearRatio × finalDrive × 60) / (2π)`
-     *
-     * @param {number} wheelSpeed — average rear wheel speed in rad/s (absolute)
-     * @returns {number} RPM clamped to [IDLE_RPM, REDLINE_RPM]
-     */
     computeRPM(wheelSpeed) {
         const ratio = Math.abs(this.currentRatio);
         if (ratio === 0) return IDLE_RPM;
         const engineRadPerSec = wheelSpeed * ratio * FINAL_DRIVE_RATIO;
         const computedRPM = (engineRadPerSec * 60) / (2 * Math.PI);
-        return Math.max(IDLE_RPM, Math.min(REDLINE_RPM, computedRPM));
+        return Math.max(IDLE_RPM, Math.min(this.redlineRPM, computedRPM));
     }
 
     /**
-     * Main per-frame update. Computes engine RPM with inertia smoothing,
-     * burns fuel, and returns the force (N) to apply to rear wheels.
-     *
-     * ### RPM Inertia
-     * ```
-     * targetRPM = max(wheelDerivedRPM, IDLE + throttle × 0.75 × (REDLINE − IDLE))
-     * rpm += (targetRPM − rpm) × min(1, ENGINE_INERTIA × dt)
-     * ```
-     *
-     * @param {number} wheelSpeed — average absolute rear wheel angular speed (rad/s)
-     * @param {number} throttleInput — 0..1 (W key)
-     * @param {boolean} isBraking
-     * @param {number} dt — delta time in seconds
-     * @returns {number} engineForce in Newtons (positive = forward, negative = reverse)
+     * Compute aerodynamic drag force in Newtons.
+     * @param {number} speedMs — vehicle speed in m/s
+     * @returns {number} drag force (always positive, opposes motion)
+     */
+    computeDragForce(speedMs) {
+        return this.dragFactor * speedMs * speedMs;
+    }
+
+    /**
+     * Compute total resistance (drag + rolling) in Newtons.
+     * @param {number} speedMs — vehicle speed in m/s
+     * @returns {number} total resistance force (positive, opposes motion)
+     */
+    computeResistance(speedMs) {
+        return this.computeDragForce(speedMs) + this.rollingResistance;
+    }
+
+    /**
+     * Main per-frame update. Returns engine force (N) for rear wheels.
+     * Drag and rolling resistance are returned separately via computeResistance().
      */
     update(wheelSpeed, throttleInput, isBraking, dt) {
         this.throttle = throttleInput;
@@ -180,14 +167,11 @@ export class Drivetrain {
 
         // ── RPM with inertia ─────────────────────────────────
         const wheelRPM = this.computeRPM(wheelSpeed);
-        // Throttle lets the engine rev independently of wheel speed (clutch model)
-        const throttleTargetRPM = IDLE_RPM + this.throttle * (REDLINE_RPM - IDLE_RPM) * 0.75;
+        const throttleTargetRPM = IDLE_RPM + this.throttle * (this.redlineRPM - IDLE_RPM) * 0.75;
         const targetRPM = Math.max(wheelRPM, throttleTargetRPM);
-        // Smooth approach — ENGINE_INERTIA controls responsiveness
         const alpha = Math.min(1, ENGINE_INERTIA * dt);
         this.rpm = this.rpm + (targetRPM - this.rpm) * alpha;
-        // Clamp to safe range
-        this.rpm = Math.max(IDLE_RPM, Math.min(REDLINE_RPM, this.rpm));
+        this.rpm = Math.max(IDLE_RPM, Math.min(this.redlineRPM, this.rpm));
 
         // ── No fuel → engine dies ────────────────────────────
         if (!this.hasFuel) {
@@ -196,7 +180,7 @@ export class Drivetrain {
         }
 
         // ── Fuel consumption ─────────────────────────────────
-        const load = (this.rpm / REDLINE_RPM) * this.throttle;
+        const load = (this.rpm / this.redlineRPM) * this.throttle;
         const consumption = FUEL_RATE_BASE * load * this.peakTorque * dt;
         this.fuel = Math.max(0, this.fuel - consumption);
 
@@ -212,19 +196,13 @@ export class Drivetrain {
         return this.currentGear === -1 ? -force : force;
     }
 
-    /** Shift up — clamp at max forward gear. */
     shiftUp() {
-        if (this.currentGear < this.gearCount) {
-            this.currentGear++;
-        }
+        if (this.currentGear < this.gearCount) this.currentGear++;
     }
 
-    /** Shift down — goes through neutral (0) to reverse (-1). */
     shiftDown() {
-        if (this.currentGear > -1) {
-            this.currentGear--;
-        }
+        if (this.currentGear > -1) this.currentGear--;
     }
 }
 
-export { IDLE_RPM, REDLINE_RPM, ENGINE_INERTIA, FINAL_DRIVE_RATIO, WHEEL_RADIUS };
+export { IDLE_RPM, DEFAULT_REDLINE_RPM as REDLINE_RPM, ENGINE_INERTIA, FINAL_DRIVE_RATIO, WHEEL_RADIUS };

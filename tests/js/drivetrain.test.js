@@ -4,9 +4,17 @@ import { Drivetrain, IDLE_RPM, REDLINE_RPM, ENGINE_INERTIA } from '../../resourc
 /** Shared bus specs matching Mitsubishi Rosa 2nd Gen */
 const SPECS = {
     engine_torque_nm: 370,
+    engine_hp: 120,
+    redline_rpm: 3200,
+    peak_torque_rpm_low: 1800,
+    peak_torque_rpm_high: 2500,
     gear_ratios: { '1': 5.18, '2': 2.86, '3': 1.59, '4': 1.0, '5': 0.74, 'R': 5.18 },
     fuel_capacity_liters: 100,
     current_fuel_liters: 100,
+    base_weight_kg: 3250,
+    drag_coefficient: 0.65,
+    width_m: 2.0,
+    height_m: 2.6,
 };
 
 describe('Drivetrain — constructor & gear parsing', () => {

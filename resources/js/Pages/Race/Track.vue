@@ -4,7 +4,7 @@ import { usePage, Link } from '@inertiajs/vue3';
 import { PhysicsWorld } from '../../GameEngine/PhysicsWorld.js';
 import { SceneManager } from '../../GameEngine/SceneManager.js';
 import { NetworkManager } from '../../GameEngine/NetworkManager.js';
-import { Drivetrain, REDLINE_RPM } from '../../GameEngine/Drivetrain.js';
+import { Drivetrain } from '../../GameEngine/Drivetrain.js';
 
 const props = defineProps({
     bus: Object,
@@ -73,9 +73,17 @@ async function initGame() {
         console.info('[Race] Step 1/5: Creating drivetrain...');
         drivetrain = new Drivetrain({
             engine_torque_nm: props.bus.engine_torque_nm,
+            engine_hp: props.bus.engine_hp,
+            redline_rpm: props.bus.redline_rpm,
+            peak_torque_rpm_low: props.bus.peak_torque_rpm_low,
+            peak_torque_rpm_high: props.bus.peak_torque_rpm_high,
             gear_ratios: props.bus.gear_ratios,
             fuel_capacity_liters: props.bus.fuel_capacity_liters,
             current_fuel_liters: props.bus.current_fuel_liters,
+            base_weight_kg: props.bus.base_weight_kg,
+            drag_coefficient: props.bus.drag_coefficient,
+            width_m: props.bus.width_m,
+            height_m: props.bus.height_m,
         });
         fuelCapacity.value = props.bus.fuel_capacity_liters;
         currentFuel.value = props.bus.current_fuel_liters;
@@ -86,13 +94,24 @@ async function initGame() {
         physics.createVehicle({
             base_weight_kg: props.bus.base_weight_kg,
             suspension_stiffness: props.bus.suspension_stiffness,
+            length_m: props.bus.length_m,
+            width_m: props.bus.width_m,
+            height_m: props.bus.height_m,
+            wheelbase_m: props.bus.wheelbase_m,
+            axle_track_m: props.bus.axle_track_m,
         });
         console.info('[Race] Step 2/5: Physics OK — wheels:', physics.vehicle?.wheelInfos?.length, 'mass:', physics.chassisBody?.mass);
 
         console.info('[Race] Step 3/5: Creating 3D scene...');
         scene = new SceneManager(canvasRef.value);
         const color = hexToInt(props.bus.paint_hex);
-        playerMesh = scene.createBusMesh(color);
+        playerMesh = scene.createBusMesh(color, {
+            length_m: props.bus.length_m,
+            width_m: props.bus.width_m,
+            height_m: props.bus.height_m,
+            wheelbase_m: props.bus.wheelbase_m,
+            axle_track_m: props.bus.axle_track_m,
+        });
         console.info('[Race] Step 3/5: Scene OK — visual wheels:', playerMesh?.wheels?.length);
 
         // Input
@@ -174,10 +193,15 @@ function gameLoop() {
     physics.vehicle.setSteeringValue(steering, 0);
     physics.vehicle.setSteeringValue(steering, 1);
 
-    // Brake
-    const brakeForce = keys.s ? 80 : 0;
+    // Brake + aerodynamic drag + rolling resistance
+    const speedMs = speed / 3.6;
+    const resistanceForce = drivetrain.computeResistance(speedMs);
+    // Apply resistance as brake force distributed across all wheels
+    // (cannon-es setBrake is a friction-like force, always opposes motion)
+    const resistanceBrake = resistanceForce / 4;
+    const manualBrake = keys.s ? 80 : 0;
     for (let i = 0; i < 4; i++) {
-        physics.vehicle.setBrake(brakeForce, i);
+        physics.vehicle.setBrake(manualBrake + resistanceBrake, i);
     }
 
     // Step physics
@@ -231,11 +255,14 @@ function gameLoop() {
     scene.render();
 }
 
-// RPM bar width for HUD (0–100%)
-const rpmPercent = computed(() => Math.min(100, (currentRPM.value / REDLINE_RPM) * 100));
+// RPM bar width for HUD (0–100%) — uses per-bus redline
+const busRedline = computed(() => props.bus?.redline_rpm || 3200);
+const rpmPercent = computed(() => Math.min(100, (currentRPM.value / busRedline.value) * 100));
 const rpmColor = computed(() => {
-    if (currentRPM.value > 2800) return 'bg-red-500';
-    if (currentRPM.value > 2200) return 'bg-amber-500';
+    const warnThreshold = busRedline.value * 0.875;  // ~87.5%
+    const dangerThreshold = busRedline.value * 0.9375; // ~93.75%
+    if (currentRPM.value > dangerThreshold) return 'bg-red-500';
+    if (currentRPM.value > warnThreshold) return 'bg-amber-500';
     return 'bg-green-500';
 });
 const fuelPercent = computed(() => {
