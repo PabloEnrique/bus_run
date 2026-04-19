@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 use App\Http\Controllers\AuthController;
 use App\Http\Controllers\DashboardController;
+use App\Http\Controllers\GarageController;
 use Illuminate\Support\Facades\Route;
 
 // Guest routes
@@ -18,5 +19,7 @@ Route::middleware('guest')->group(function () {
 Route::middleware('auth')->group(function () {
     Route::get('/', fn () => redirect('/dashboard'));
     Route::get('/dashboard', [DashboardController::class, 'index'])->name('dashboard');
+    Route::get('/garage', [GarageController::class, 'index'])->name('garage');
+    Route::get('/garage/{bus}', [GarageController::class, 'show'])->name('garage.show');
     Route::post('/logout', [AuthController::class, 'logout'])->name('logout');
 });
