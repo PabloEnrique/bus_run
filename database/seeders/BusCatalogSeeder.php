@@ -43,6 +43,7 @@ class BusCatalogSeeder extends Seeder
                         'torque_idle_nm' => $gen['torque_idle_nm'] ?? 150,
                         'torque_redline_nm' => $gen['torque_redline_nm'] ?? 120,
                         'drag_coefficient' => $gen['drag_coefficient'] ?? 0.70,
+                        'glb_file' => $gen['glb_file'] ?? null,
                     ]
                 );
 

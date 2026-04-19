@@ -123,14 +123,24 @@ async function initGame() {
         console.info('[Race] Step 3/5: Creating 3D scene...');
         scene = new SceneManager(canvasRef.value, mapConfig);
         const color = hexToInt(props.bus.paint_hex);
-        playerMesh = scene.createBusMesh(color, {
+        const busVisualSpecs = {
             length_m: props.bus.length_m,
             width_m: props.bus.width_m,
             height_m: props.bus.height_m,
             wheelbase_m: props.bus.wheelbase_m,
             axle_track_m: props.bus.axle_track_m,
-        });
+        };
+        playerMesh = scene.createBusMesh(color, busVisualSpecs);
         console.info('[Race] Step 3/5: Scene OK — visual wheels:', playerMesh?.wheels?.length);
+
+        // Fire-and-forget: load HDRI environment for PBR reflections
+        scene.loadEnvironment('/models/env/outdoor.hdr');
+
+        // Fire-and-forget: load GLB bus model (replaces procedural when ready)
+        if (props.bus.glb_file) {
+            scene.loadBusMeshGLB(props.bus.glb_file, color, busVisualSpecs, playerMesh)
+                .then((glbMesh) => { if (glbMesh) playerMesh = glbMesh; });
+        }
 
         // Input
         window.addEventListener('keydown', onKeyDown);

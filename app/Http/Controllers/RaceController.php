@@ -83,6 +83,7 @@ class RaceController extends Controller
             'drag_coefficient'     => $bus->drag_coefficient,
             'paint_hex'            => $bus->pivot->paint_hex,
             'nickname'             => $bus->pivot->nickname,
+            'glb_file'             => $bus->glb_file,
         ];
 
         return Inertia::render('Race/Track', [

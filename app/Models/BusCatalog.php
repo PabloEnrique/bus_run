@@ -32,6 +32,7 @@ class BusCatalog extends Model
         'torque_idle_nm',
         'torque_redline_nm',
         'drag_coefficient',
+        'glb_file',
         'thumbnail_url',
     ];
 
@@ -56,6 +57,7 @@ class BusCatalog extends Model
             'torque_idle_nm' => 'integer',
             'torque_redline_nm' => 'integer',
             'drag_coefficient' => 'float',
+            'glb_file' => 'string',
         ];
     }
 

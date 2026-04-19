@@ -4,6 +4,7 @@
         "generations": [
             {
                 "generation": "2nd Gen (BE4)",
+                "glb_file": "rosa_2nd.glb",
                 "base_weight_kg": 3250,
                 "engine_torque_nm": 290,
                 "engine_hp": 120,
@@ -25,6 +26,7 @@
             },
             {
                 "generation": "3rd Gen (BE6)",
+                "glb_file": "rosa_3rd.glb",
                 "base_weight_kg": 3400,
                 "engine_torque_nm": 420,
                 "engine_hp": 165,
@@ -46,6 +48,7 @@
             },
             {
                 "generation": "4th Gen (BE7)",
+                "glb_file": "rosa_4th.glb",
                 "base_weight_kg": 3650,
                 "engine_torque_nm": 530,
                 "engine_hp": 180,
@@ -72,6 +75,7 @@
         "generations": [
             {
                 "generation": "2nd Gen (B20)",
+                "glb_file": "coaster_2nd.glb",
                 "base_weight_kg": 3100,
                 "engine_torque_nm": 240,
                 "engine_hp": 100,
@@ -93,6 +97,7 @@
             },
             {
                 "generation": "3rd Gen (B40/50)",
+                "glb_file": "coaster_3rd.glb",
                 "base_weight_kg": 3350,
                 "engine_torque_nm": 390,
                 "engine_hp": 150,
@@ -114,6 +119,7 @@
             },
             {
                 "generation": "4th Gen (B60/70)",
+                "glb_file": "coaster_4th.glb",
                 "base_weight_kg": 3550,
                 "engine_torque_nm": 450,
                 "engine_hp": 170,
@@ -140,6 +146,7 @@
         "generations": [
             {
                 "generation": "A-Series (Early)",
+                "glb_file": "volare_a.glb",
                 "base_weight_kg": 4200,
                 "engine_torque_nm": 430,
                 "engine_hp": 155,
@@ -161,6 +168,7 @@
             },
             {
                 "generation": "W-Series (W8/W9)",
+                "glb_file": "volare_w.glb",
                 "base_weight_kg": 4500,
                 "engine_torque_nm": 600,
                 "engine_hp": 200,
@@ -182,6 +190,7 @@
             },
             {
                 "generation": "Fly/V-Series (Modern)",
+                "glb_file": "volare_fly.glb",
                 "base_weight_kg": 4800,
                 "engine_torque_nm": 700,
                 "engine_hp": 220,

@@ -1,4 +1,7 @@
 import * as THREE from 'three';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js';
+import { RGBELoader } from 'three/addons/loaders/RGBELoader.js';
 
 export class SceneManager {
     /**
@@ -51,6 +54,15 @@ export class SceneManager {
         // Resize handler
         this._onResize = () => this.resize();
         window.addEventListener('resize', this._onResize);
+
+        // ── GLTFLoader (shared instance) ─────────────────────
+        this._gltfLoader = new GLTFLoader();
+        const draco = new DRACOLoader();
+        draco.setDecoderPath('https://www.gstatic.com/draco/versioned/decoders/1.5.7/');
+        this._gltfLoader.setDRACOLoader(draco);
+
+        // Environment map (set by loadEnvironment)
+        this._envMap = null;
     }
 
     // ─────────────────────────────────────────────────────────
@@ -246,13 +258,85 @@ export class SceneManager {
         this.scene.add(grass);
     }
 
+    // ─────────────────────────────────────────────────────────
+    //  HDRI Environment Map (PBR reflections)
+    // ─────────────────────────────────────────────────────────
+
     /**
-     * Create a bus mesh sized according to bus specs.
+     * Load an .hdr environment map for PBR reflections.
+     * Sets scene.environment (NOT scene.background — keeps solid skyColor).
+     * Falls back to a procedural env map if the file is unavailable.
+     * @param {string} hdrPath — URL to .hdr file (e.g. '/models/env/outdoor.hdr')
+     * @returns {Promise<void>}
+     */
+    async loadEnvironment(hdrPath) {
+        const pmrem = new THREE.PMREMGenerator(this.renderer);
+        pmrem.compileEquirectangularShader();
+
+        try {
+            const texture = await new RGBELoader().loadAsync(hdrPath);
+            texture.mapping = THREE.EquirectangularReflectionMapping;
+            this._envMap = pmrem.fromEquirectangular(texture).texture;
+            texture.dispose();
+            console.info('[Scene] HDRI environment loaded from', hdrPath);
+        } catch {
+            // .hdr not available — generate procedural env from scene lights
+            this._envMap = this._generateProceduralEnvMap(pmrem);
+            console.warn('[Scene] HDRI not found, using procedural environment map');
+        }
+
+        this.scene.environment = this._envMap;
+        pmrem.dispose();
+    }
+
+    /**
+     * Generate a minimal procedural environment map from the current scene lights.
+     * Produces a simple gradient with sun highlight so metallic surfaces
+     * show reflections even without an .hdr file.
+     * @param {THREE.PMREMGenerator} pmrem
+     * @returns {THREE.Texture}
+     * @private
+     */
+    _generateProceduralEnvMap(pmrem) {
+        const envScene = new THREE.Scene();
+        const skyColor = this.scene.background instanceof THREE.Color
+            ? this.scene.background
+            : new THREE.Color(0x87ceeb);
+
+        // Hemisphere gradient: sky above, darker ground below
+        const hemiLight = new THREE.HemisphereLight(skyColor, 0x444422, 1.0);
+        envScene.add(hemiLight);
+
+        // Sun highlight for specular reflections
+        const sun = new THREE.DirectionalLight(0xffffff, 0.8);
+        sun.position.set(50, 80, 30);
+        envScene.add(sun);
+
+        return pmrem.fromScene(envScene, 0.04).texture;
+    }
+
+    // ─────────────────────────────────────────────────────────
+    //  Bus mesh creation (procedural + GLB)
+    // ─────────────────────────────────────────────────────────
+
+    /**
+     * Create a procedural bus mesh sized according to bus specs.
+     * Used as instant fallback while GLB loads (or when no GLB is available).
      * @param {number} color — hex color
      * @param {object} [busSpecs] — bus catalog data with dimension fields
      * @returns {THREE.Group}
      */
     createBusMesh(color = 0xffb300, busSpecs = {}) {
+        return this._createProceduralBus(color, busSpecs);
+    }
+
+    /**
+     * @param {number} color
+     * @param {object} busSpecs
+     * @returns {THREE.Group}
+     * @private
+     */
+    _createProceduralBus(color, busSpecs = {}) {
         const group = new THREE.Group();
 
         // Dimensions from specs (or sensible defaults)
@@ -312,6 +396,118 @@ export class SceneManager {
 
         this.scene.add(group);
         return group;
+    }
+
+    /**
+     * Asynchronously load a GLB bus model and replace the procedural mesh.
+     * Applies PBR paint material (high metalness, low roughness) to body meshes.
+     * Identifies wheels by mesh name convention (wheel, rueda, tire, llanta).
+     *
+     * @param {string} glbFile — filename inside /models/buses/ (e.g. 'rosa_2nd.glb')
+     * @param {number} color — hex paint color
+     * @param {object} busSpecs — bus catalog dimensions
+     * @param {THREE.Group} [proceduralMesh] — existing procedural mesh to remove on success
+     * @returns {Promise<THREE.Group|null>} — GLB group or null on failure
+     */
+    async loadBusMeshGLB(glbFile, color, busSpecs = {}, proceduralMesh = null) {
+        const url = `/models/buses/${glbFile}`;
+        try {
+            const gltf = await this._gltfLoader.loadAsync(url);
+            const model = gltf.scene;
+
+            // ── Scale normalization ──────────────────────────
+            // Compute bounding box of loaded model, scale to match bus length.
+            const box = new THREE.Box3().setFromObject(model);
+            const modelSize = new THREE.Vector3();
+            box.getSize(modelSize);
+
+            const targetLength = busSpecs.length_m || 6.0;
+            // Use the longest axis (typically Z or X depending on model orientation)
+            const maxDim = Math.max(modelSize.x, modelSize.y, modelSize.z);
+            if (maxDim > 0) {
+                const scale = targetLength / maxDim;
+                model.scale.setScalar(scale);
+            }
+
+            // Re-center after scaling
+            const scaledBox = new THREE.Box3().setFromObject(model);
+            const center = new THREE.Vector3();
+            scaledBox.getCenter(center);
+            model.position.sub(center);
+
+            // ── Wrap in group (same interface as procedural) ─
+            const group = new THREE.Group();
+            group.add(model);
+            group.wheels = [];
+
+            // ── PBR paint material ───────────────────────────
+            const paintMat = new THREE.MeshStandardMaterial({
+                color,
+                metalness: 0.8,
+                roughness: 0.25,
+                envMap: this._envMap,
+                envMapIntensity: 1.2,
+            });
+
+            const glassMat = new THREE.MeshStandardMaterial({
+                color: 0x222233,
+                metalness: 0.1,
+                roughness: 0.05,
+                opacity: 0.4,
+                transparent: true,
+            });
+
+            const wheelPattern = /wheel|rueda|tire|llanta|tyre/i;
+            const glassPattern = /glass|window|vidrio|ventana|cristal/i;
+            const bodyPattern  = /body|paint|carroceria|chassis|hull|frame/i;
+
+            model.traverse((child) => {
+                if (!child.isMesh) return;
+
+                child.castShadow = true;
+                child.receiveShadow = true;
+
+                const name = (child.name || '').toLowerCase();
+                const matName = (child.material?.name || '').toLowerCase();
+
+                if (wheelPattern.test(name) || wheelPattern.test(matName)) {
+                    // Wheel — keep original material, collect for physics sync
+                    group.wheels.push(child);
+                } else if (glassPattern.test(name) || glassPattern.test(matName)) {
+                    child.material = glassMat;
+                } else if (bodyPattern.test(name) || bodyPattern.test(matName)) {
+                    child.material = paintMat;
+                } else {
+                    // Default: apply paint to untagged meshes
+                    child.material = paintMat;
+                }
+            });
+
+            // ── Sort wheels by position: FL, FR, RL, RR ─────
+            if (group.wheels.length >= 4) {
+                group.wheels.sort((a, b) => {
+                    const wpa = new THREE.Vector3();
+                    const wpb = new THREE.Vector3();
+                    a.getWorldPosition(wpa);
+                    b.getWorldPosition(wpb);
+                    // Front (higher Z) first, then left (lower X) first
+                    if (Math.abs(wpa.z - wpb.z) > 0.3) return wpb.z - wpa.z;
+                    return wpa.x - wpb.x;
+                });
+            }
+
+            // Remove procedural mesh if provided
+            if (proceduralMesh) {
+                this.scene.remove(proceduralMesh);
+            }
+
+            this.scene.add(group);
+            console.info('[Scene] GLB bus loaded:', glbFile, '— wheels found:', group.wheels.length);
+            return group;
+        } catch (err) {
+            console.warn('[Scene] GLB load failed for', glbFile, '— keeping procedural mesh:', err.message);
+            return null;
+        }
     }
 
     syncMeshToBody(mesh, chassisBody, wheelBodies) {
@@ -455,6 +651,11 @@ export class SceneManager {
         window.removeEventListener('resize', this._onResize);
         this.remotePlayers.forEach((entry) => this.scene.remove(entry.mesh));
         this.remotePlayers.clear();
+        if (this._envMap) {
+            this._envMap.dispose();
+            this._envMap = null;
+        }
+        this._gltfLoader.dracoLoader?.dispose();
         this.renderer.dispose();
     }
 }
