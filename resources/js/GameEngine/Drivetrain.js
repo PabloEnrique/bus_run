@@ -38,6 +38,10 @@ const AIR_DENSITY = 1.225;
 const ROLLING_RESISTANCE_COEFF = 0.008;
 /** @constant {number} Gravity (m/s²) */
 const GRAVITY = 9.82;
+/** @constant {number} Clutch engagement time in seconds (0→1) */
+const CLUTCH_ENGAGE_TIME = 0.8;
+/** @constant {number} Idle creep force in Newtons (forward push when in gear, no throttle, no brake) */
+const IDLE_CREEP_FORCE = 350;
 
 export class Drivetrain {
     /**
@@ -91,6 +95,10 @@ export class Drivetrain {
         this.rpm = IDLE_RPM;
         this.throttle = 0;
         this.braking = false;
+
+        // ── Clutch state ─────────────────────────────────────
+        /** 0 = fully disengaged, 1 = fully engaged */
+        this.clutch = 1.0;
 
         this.fuelCapacity = specs.fuel_capacity_liters || 100;
         this.fuel = specs.current_fuel_liters ?? this.fuelCapacity;
@@ -159,16 +167,27 @@ export class Drivetrain {
 
     /**
      * Main per-frame update. Returns engine force (N) for rear wheels.
+     * Includes clutch engagement ramp, non-linear throttle, and idle creep.
      * Drag and rolling resistance are returned separately via computeResistance().
      */
     update(wheelSpeed, throttleInput, isBraking, dt) {
-        this.throttle = throttleInput;
+        // ── Non-linear throttle (cubic) ──────────────────────
+        // Makes low-end throttle more controllable (diesel feel)
+        this.throttle = throttleInput * throttleInput * throttleInput;
         this.braking = isBraking;
+
+        // ── Clutch engagement ramp ───────────────────────────
+        // After a gear change clutch starts at 0, ramps to 1 over CLUTCH_ENGAGE_TIME
+        if (this.clutch < 1.0) {
+            this.clutch = Math.min(1.0, this.clutch + dt / CLUTCH_ENGAGE_TIME);
+        }
 
         // ── RPM with inertia ─────────────────────────────────
         const wheelRPM = this.computeRPM(wheelSpeed);
         const throttleTargetRPM = IDLE_RPM + this.throttle * (this.redlineRPM - IDLE_RPM) * 0.75;
-        const targetRPM = Math.max(wheelRPM, throttleTargetRPM);
+        // Clutch slip: when clutch is partly engaged, engine is less coupled to wheels
+        const coupledRPM = IDLE_RPM + (wheelRPM - IDLE_RPM) * this.clutch;
+        const targetRPM = Math.max(coupledRPM, throttleTargetRPM);
         const alpha = Math.min(1, ENGINE_INERTIA * dt);
         this.rpm = this.rpm + (targetRPM - this.rpm) * alpha;
         this.rpm = Math.max(IDLE_RPM, Math.min(this.redlineRPM, this.rpm));
@@ -186,23 +205,38 @@ export class Drivetrain {
 
         // ── Engine force ─────────────────────────────────────
         const ratio = this.currentRatio;
-        if (ratio === 0 || this.throttle === 0) return 0;
+        if (ratio === 0) return 0;  // neutral → no force
+
+        // Idle creep: when in gear, no throttle, no brake → gentle forward push
+        if (this.throttle === 0) {
+            if (!this.braking && this.currentGear !== 0) {
+                const sign = this.currentGear === -1 ? -1 : 1;
+                return sign * IDLE_CREEP_FORCE * this.clutch;
+            }
+            return 0;
+        }
 
         const torqueMultiplier = this.torqueCurve(this.rpm);
         const wheelTorque = this.peakTorque * torqueMultiplier * this.throttle
             * Math.abs(ratio) * FINAL_DRIVE_RATIO;
-        const force = wheelTorque / WHEEL_RADIUS;
+        const force = (wheelTorque / WHEEL_RADIUS) * this.clutch;
 
         return this.currentGear === -1 ? -force : force;
     }
 
     shiftUp() {
-        if (this.currentGear < this.gearCount) this.currentGear++;
+        if (this.currentGear < this.gearCount) {
+            this.currentGear++;
+            this.clutch = 0;
+        }
     }
 
     shiftDown() {
-        if (this.currentGear > -1) this.currentGear--;
+        if (this.currentGear > -1) {
+            this.currentGear--;
+            this.clutch = 0;
+        }
     }
 }
 
-export { IDLE_RPM, DEFAULT_REDLINE_RPM as REDLINE_RPM, ENGINE_INERTIA, FINAL_DRIVE_RATIO, WHEEL_RADIUS };
+export { IDLE_RPM, DEFAULT_REDLINE_RPM as REDLINE_RPM, ENGINE_INERTIA, FINAL_DRIVE_RATIO, WHEEL_RADIUS, CLUTCH_ENGAGE_TIME, IDLE_CREEP_FORCE };

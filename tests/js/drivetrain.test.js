@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { Drivetrain, IDLE_RPM, REDLINE_RPM, ENGINE_INERTIA } from '../../resources/js/GameEngine/Drivetrain.js';
+import { Drivetrain, IDLE_RPM, REDLINE_RPM, ENGINE_INERTIA, CLUTCH_ENGAGE_TIME, IDLE_CREEP_FORCE } from '../../resources/js/GameEngine/Drivetrain.js';
 
 /** Shared bus specs matching Mitsubishi Rosa 2nd Gen */
 const SPECS = {
@@ -83,10 +83,12 @@ describe('Drivetrain — update() force output', () => {
         expect(force).toBeGreaterThan(0);
     });
 
-    it('returns 0 force when throttle is 0', () => {
+    it('returns idle creep force (not zero) when throttle is 0 and in gear', () => {
         const dt = new Drivetrain(SPECS);
         const force = dt.update(5, 0, false, 1 / 60);
-        expect(force).toBe(0);
+        // Idle creep: positive force when in gear, no throttle, no brake
+        expect(force).toBeGreaterThan(0);
+        expect(force).toBeLessThanOrEqual(IDLE_CREEP_FORCE);
     });
 
     it('returns 0 force in neutral gear', () => {
@@ -207,5 +209,101 @@ describe('Drivetrain — fuel consumption', () => {
         }
         expect(dt.fuel).toBeLessThan(initialFuel);
         expect(dt.fuel).toBeGreaterThan(0);
+    });
+});
+
+describe('Drivetrain — clutch engagement', () => {
+    it('clutch starts fully engaged (1.0) on a new drivetrain', () => {
+        const dt = new Drivetrain(SPECS);
+        expect(dt.clutch).toBe(1.0);
+    });
+
+    it('clutch resets to 0 on shiftUp', () => {
+        const dt = new Drivetrain(SPECS);
+        dt.shiftUp();
+        expect(dt.clutch).toBe(0);
+    });
+
+    it('clutch resets to 0 on shiftDown', () => {
+        const dt = new Drivetrain(SPECS);
+        dt.shiftDown();
+        expect(dt.clutch).toBe(0);
+    });
+
+    it('clutch ramps from 0 to 1 over ~CLUTCH_ENGAGE_TIME', () => {
+        const dt = new Drivetrain(SPECS);
+        dt.shiftUp();
+        expect(dt.clutch).toBe(0);
+
+        // Simulate frames for clutch engage time
+        const frames = Math.ceil(CLUTCH_ENGAGE_TIME * 60);
+        for (let i = 0; i < frames; i++) {
+            dt.update(0, 1.0, false, 1 / 60);
+        }
+        expect(dt.clutch).toBeCloseTo(1.0, 1);
+    });
+
+    it('engine force is reduced while clutch is engaging', () => {
+        const dt1 = new Drivetrain(SPECS);
+        // Full clutch engagement
+        const forceFullClutch = dt1.update(5, 1.0, false, 1 / 60);
+
+        const dt2 = new Drivetrain(SPECS);
+        dt2.shiftUp(); // Clutch = 0
+        dt2.update(5, 1.0, false, 1 / 60); // 1 frame, clutch partially engaged
+        const forcePartialClutch = dt2.update(5, 1.0, false, 1 / 60);
+
+        // Partial clutch should produce less force
+        expect(Math.abs(forcePartialClutch)).toBeLessThan(Math.abs(forceFullClutch));
+    });
+});
+
+describe('Drivetrain — idle creep', () => {
+    it('produces forward force when in gear, no throttle, no brake', () => {
+        const dt = new Drivetrain(SPECS);
+        const force = dt.update(0, 0, false, 1 / 60);
+        expect(force).toBeGreaterThan(0);
+        expect(force).toBeLessThanOrEqual(IDLE_CREEP_FORCE);
+    });
+
+    it('produces no creep force when braking', () => {
+        const dt = new Drivetrain(SPECS);
+        const force = dt.update(0, 0, true, 1 / 60);
+        expect(force).toBe(0);
+    });
+
+    it('produces no creep force in neutral', () => {
+        const dt = new Drivetrain(SPECS);
+        dt.currentGear = 0;
+        const force = dt.update(0, 0, false, 1 / 60);
+        expect(force).toBe(0);
+    });
+
+    it('produces negative creep force in reverse', () => {
+        const dt = new Drivetrain(SPECS);
+        dt.currentGear = -1;
+        const force = dt.update(0, 0, false, 1 / 60);
+        expect(force).toBeLessThan(0);
+    });
+});
+
+describe('Drivetrain — non-linear throttle', () => {
+    it('cubic throttle: 50% input produces ~12.5% effective throttle', () => {
+        const dt = new Drivetrain(SPECS);
+        dt.update(5, 0.5, false, 1 / 60);
+        // 0.5^3 = 0.125
+        expect(dt.throttle).toBeCloseTo(0.125, 2);
+    });
+
+    it('full throttle input still yields full effective throttle', () => {
+        const dt = new Drivetrain(SPECS);
+        dt.update(5, 1.0, false, 1 / 60);
+        expect(dt.throttle).toBe(1.0);
+    });
+
+    it('zero throttle input yields zero effective throttle', () => {
+        const dt = new Drivetrain(SPECS);
+        dt.update(5, 0, false, 1 / 60);
+        expect(dt.throttle).toBe(0);
     });
 });
