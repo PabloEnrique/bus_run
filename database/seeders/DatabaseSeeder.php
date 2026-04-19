@@ -12,6 +12,7 @@ class DatabaseSeeder extends Seeder
     {
         $this->call([
             BusCatalogSeeder::class,
+            DevUserSeeder::class,
         ]);
     }
 }
