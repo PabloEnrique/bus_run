@@ -77,71 +77,21 @@ export class PhysicsWorld {
     }
 
     /**
-     * Build the rectangular loop track (160×100 m outer, 20 m lane width)
-     * with ground segments, infield, fallback plane, and wall barriers.
+     * Build a large flat driveway — a single ground plane at Y = 0
+     * with no walls or obstacles.
      * @private
      */
     _createTrack() {
-        const halfOW = OUTER_W / 2;   // 80
-        const halfOH = OUTER_H / 2;   // 50
-        const halfIW = INNER_W / 2;   // 60
-        const halfIH = INNER_H / 2;   // 30
-        const tw = TRACK_W;           // 20
-        const groundY = 0;
-        const halfThick = 0.1;        // ground slab half-thickness
-
-        // Helper: static box at position
-        const addBox = (hx, hy, hz, px, py, pz, material, group = COLLISION_GROUND) => {
-            const body = new CANNON.Body({
-                mass: 0,
-                shape: new CANNON.Box(new CANNON.Vec3(hx, hy, hz)),
-                material,
-                collisionFilterGroup: group,
-            });
-            body.position.set(px, py, pz);
-            this.world.addBody(body);
-            return body;
-        };
-
-        // ── Ground segments (track surface) ──────────────────
-        // North straight: full OUTER_W wide, tw deep
-        addBox(halfOW, halfThick, tw / 2,  0, groundY - halfThick, halfOH - tw / 2,  this.trackMaterial);
-        // South straight
-        addBox(halfOW, halfThick, tw / 2,  0, groundY - halfThick, -(halfOH - tw / 2), this.trackMaterial);
-        // East straight: tw wide, INNER_H deep
-        addBox(tw / 2, halfThick, halfIH,  halfOW - tw / 2, groundY - halfThick, 0,  this.trackMaterial);
-        // West straight
-        addBox(tw / 2, halfThick, halfIH,  -(halfOW - tw / 2), groundY - halfThick, 0, this.trackMaterial);
-
-        // ── Infield (inside the loop — keep buses from cutting) ──
-        addBox(halfIW, halfThick, halfIH, 0, groundY - halfThick - 0.01, 0, this.trackMaterial);
-
-        // ── Fallback plane far below (catch falls) ───────────
-        const fallback = new CANNON.Body({
+        // Large flat ground plane at Y = 0
+        const ground = new CANNON.Body({
             mass: 0,
             shape: new CANNON.Plane(),
             material: this.trackMaterial,
             collisionFilterGroup: COLLISION_GROUND,
         });
-        fallback.quaternion.setFromEuler(-Math.PI / 2, 0, 0);
-        fallback.position.set(0, -2, 0);
-        this.world.addBody(fallback);
-
-        // ── Walls ────────────────────────────────────────────
-        const wh = WALL_HEIGHT / 2;
-        const wt = WALL_THICK / 2;
-
-        // Outer walls
-        addBox(halfOW, wh, wt,  0, wh,  halfOH + wt,  this.wallMaterial, COLLISION_WALL); // north outer
-        addBox(halfOW, wh, wt,  0, wh, -(halfOH + wt), this.wallMaterial, COLLISION_WALL); // south outer
-        addBox(wt, wh, halfOH,  halfOW + wt, wh, 0,   this.wallMaterial, COLLISION_WALL); // east outer
-        addBox(wt, wh, halfOH, -(halfOW + wt), wh, 0,  this.wallMaterial, COLLISION_WALL); // west outer
-
-        // Inner walls
-        addBox(halfIW, wh, wt,  0, wh,  halfIH + wt,  this.wallMaterial, COLLISION_WALL); // north inner
-        addBox(halfIW, wh, wt,  0, wh, -(halfIH + wt), this.wallMaterial, COLLISION_WALL); // south inner
-        addBox(wt, wh, halfIH,  halfIW + wt, wh, 0,   this.wallMaterial, COLLISION_WALL); // east inner
-        addBox(wt, wh, halfIH, -(halfIW + wt), wh, 0,  this.wallMaterial, COLLISION_WALL); // west inner
+        ground.quaternion.setFromEuler(-Math.PI / 2, 0, 0);
+        ground.position.set(0, 0, 0);
+        this.world.addBody(ground);
     }
 
     /**
@@ -182,8 +132,8 @@ export class PhysicsWorld {
             collisionFilterMask: COLLISION_WALL | COLLISION_VEHICLE,
         });
         this.chassisBody.addShape(chassisShape);
-        // Spawn on south straight — high enough to settle onto springs
-        this.chassisBody.position.set(0, 2.0, -(OUTER_H / 2 - TRACK_W / 2));
+        // Spawn at origin, high enough to settle onto springs
+        this.chassisBody.position.set(0, 2.0, 0);
 
         const vehicle = new CANNON.RaycastVehicle({
             chassisBody: this.chassisBody,

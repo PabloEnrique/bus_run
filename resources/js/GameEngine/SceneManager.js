@@ -1,5 +1,4 @@
 import * as THREE from 'three';
-import { OUTER_W, OUTER_H, INNER_W, INNER_H, TRACK_W, WALL_HEIGHT } from './PhysicsWorld.js';
 
 export class SceneManager {
     constructor(canvas) {
@@ -51,75 +50,37 @@ export class SceneManager {
     // ─────────────────────────────────────────────────────────
 
     _createTrackVisuals() {
-        const halfOW = OUTER_W / 2;
-        const halfOH = OUTER_H / 2;
-        const halfIW = INNER_W / 2;
-        const halfIH = INNER_H / 2;
-        const tw = TRACK_W;
-
         // Materials
         const asphalt = new THREE.MeshStandardMaterial({ color: 0x333333, roughness: 0.9 });
-        const wallMat = new THREE.MeshStandardMaterial({ color: 0x888888, roughness: 0.7 });
         const grassMat = new THREE.MeshStandardMaterial({ color: 0x2d5a1e, roughness: 0.95 });
-        const dirtMat  = new THREE.MeshStandardMaterial({ color: 0x4a3728, roughness: 0.95 });
         const lineMat  = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.8 });
 
-        const addMesh = (geo, mat, px, py, pz) => {
-            const m = new THREE.Mesh(geo, mat);
-            m.position.set(px, py, pz);
-            m.receiveShadow = true;
-            this.scene.add(m);
-            return m;
-        };
+        // ── Large flat asphalt plane ─────────────────────────
+        const roadGeo = new THREE.PlaneGeometry(400, 400);
+        const road = new THREE.Mesh(roadGeo, asphalt);
+        road.rotation.x = -Math.PI / 2;
+        road.position.y = 0;
+        road.receiveShadow = true;
+        this.scene.add(road);
 
-        // ── Track surface (4 straights) ──────────────────────
-        // North: OUTER_W × tw
-        addMesh(new THREE.BoxGeometry(OUTER_W, 0.15, tw), asphalt, 0, -0.075, halfOH - tw / 2);
-        // South
-        addMesh(new THREE.BoxGeometry(OUTER_W, 0.15, tw), asphalt, 0, -0.075, -(halfOH - tw / 2));
-        // East: tw × INNER_H
-        addMesh(new THREE.BoxGeometry(tw, 0.15, INNER_H), asphalt, halfOW - tw / 2, -0.075, 0);
-        // West
-        addMesh(new THREE.BoxGeometry(tw, 0.15, INNER_H), asphalt, -(halfOW - tw / 2), -0.075, 0);
+        // ── Grass fringe beyond the asphalt ──────────────────
+        const grassGeo = new THREE.PlaneGeometry(1000, 1000);
+        const grass = new THREE.Mesh(grassGeo, grassMat);
+        grass.rotation.x = -Math.PI / 2;
+        grass.position.y = -0.01;
+        grass.receiveShadow = true;
+        this.scene.add(grass);
 
-        // ── Infield (green) ──────────────────────────────────
-        addMesh(new THREE.BoxGeometry(INNER_W, 0.05, INNER_H), grassMat, 0, -0.15, 0);
-
-        // ── Outside ground (brown) ───────────────────────────
-        const outsideGeo = new THREE.PlaneGeometry(500, 500);
-        const outside = new THREE.Mesh(outsideGeo, dirtMat);
-        outside.rotation.x = -Math.PI / 2;
-        outside.position.y = -0.2;
-        outside.receiveShadow = true;
-        this.scene.add(outside);
-
-        // ── Start / finish line (south straight, white stripe) ──
-        addMesh(new THREE.BoxGeometry(tw, 0.16, 1.0), lineMat, 0, 0, -(halfOH - tw / 2));
-
-        // ── Walls ────────────────────────────────────────────
-        const wh = WALL_HEIGHT;
-        const wt = 0.5;
-
-        const addWall = (sx, sy, sz, px, py, pz) => {
-            const geo = new THREE.BoxGeometry(sx, sy, sz);
-            const m = new THREE.Mesh(geo, wallMat);
-            m.position.set(px, py, pz);
-            m.castShadow = true;
-            m.receiveShadow = true;
-            this.scene.add(m);
-        };
-
-        // Outer walls
-        addWall(OUTER_W, wh, wt,  0, wh / 2,  halfOH + wt / 2);
-        addWall(OUTER_W, wh, wt,  0, wh / 2, -(halfOH + wt / 2));
-        addWall(wt, wh, OUTER_H,  halfOW + wt / 2, wh / 2, 0);
-        addWall(wt, wh, OUTER_H, -(halfOW + wt / 2), wh / 2, 0);
-
-        // Inner walls
-        addWall(INNER_W, wh, wt,  0, wh / 2,  halfIH + wt / 2);
-        addWall(INNER_W, wh, wt,  0, wh / 2, -(halfIH + wt / 2));
-        addWall(wt, wh, INNER_H,  halfIW + wt / 2, wh / 2, 0);
-        addWall(wt, wh, INNER_H, -(halfIW + wt / 2), wh / 2, 0);
+        // ── Lane markings (white dashed center line along Z) ─
+        for (let z = -180; z <= 180; z += 8) {
+            const dash = new THREE.Mesh(
+                new THREE.BoxGeometry(0.15, 0.02, 3),
+                lineMat,
+            );
+            dash.position.set(0, 0.005, z);
+            dash.receiveShadow = true;
+            this.scene.add(dash);
+        }
     }
 
     createBusMesh(color = 0xffb300) {
@@ -268,25 +229,27 @@ export class SceneManager {
             ? Math.sqrt(velocity.x * velocity.x + velocity.z * velocity.z)
             : 0;
 
-        // Dynamic distance + height
-        const dist   = 8 + Math.min(speed * 0.05, 4);
-        const height = 4 + Math.min(speed * 0.03, 1.5);
+        // Dynamic distance + height — camera pulls back as speed increases
+        const dist   = 10 + Math.min(speed * 0.08, 6);
+        const height = 4  + Math.min(speed * 0.02, 2);
 
-        // Camera behind bus
+        // Forward = local +Z in world space
         const forward = new THREE.Vector3(0, 0, 1).applyQuaternion(target.quaternion);
-        const desiredPos = new THREE.Vector3()
-            .copy(target.position)
-            .add(forward.clone().multiplyScalar(-dist))
+
+        // Position camera BEHIND the bus (opposite of forward)
+        const desiredPos = target.position.clone()
+            .sub(forward.clone().multiplyScalar(dist))
             .add(new THREE.Vector3(0, height, 0));
 
-        this.camera.position.lerp(desiredPos, 0.08);
+        // Smooth follow
+        this.camera.position.lerp(desiredPos, 0.06);
 
-        // Look-ahead: look at a point ahead of the bus proportional to speed
-        const lookAhead = Math.min(speed * 0.3, 10);
+        // Look at a point slightly AHEAD and ABOVE the bus
+        const lookAhead = 4 + Math.min(speed * 0.15, 8);
         this._cameraTarget
             .copy(target.position)
             .add(forward.clone().multiplyScalar(lookAhead))
-            .add(new THREE.Vector3(0, 1, 0));
+            .add(new THREE.Vector3(0, 1.5, 0));
         this.camera.lookAt(this._cameraTarget);
     }
 

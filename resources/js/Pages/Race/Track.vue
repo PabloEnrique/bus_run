@@ -194,7 +194,7 @@ function gameLoop() {
 
     // Respawn safety — if bus falls below track, reset to spawn
     if (physics.chassisBody.position.y < -10) {
-        physics.chassisBody.position.set(0, 3.0, -(50 - 10));
+        physics.chassisBody.position.set(0, 3.0, 0);
         physics.chassisBody.velocity.set(0, 0, 0);
         physics.chassisBody.angularVelocity.set(0, 0, 0);
         physics.chassisBody.quaternion.set(0, 0, 0, 1);
