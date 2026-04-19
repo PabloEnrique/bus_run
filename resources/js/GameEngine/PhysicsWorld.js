@@ -1,35 +1,119 @@
 import * as CANNON from 'cannon-es';
 
+// ── Track dimensions ─────────────────────────────────────────
+const OUTER_W = 160;   // outer width  (X axis)
+const OUTER_H = 100;   // outer height (Z axis)
+const TRACK_W = 20;    // lane width
+const INNER_W = OUTER_W - TRACK_W * 2; // 120
+const INNER_H = OUTER_H - TRACK_W * 2; //  60
+const WALL_HEIGHT = 2;
+const WALL_THICK = 0.5;
+
 export class PhysicsWorld {
     constructor() {
         this.world = new CANNON.World();
         this.world.gravity.set(0, -9.82, 0);
         this.world.broadphase = new CANNON.SAPBroadphase(this.world);
-        this.world.defaultContactMaterial.friction = 0.3;
+        this.world.defaultContactMaterial.friction = 0.2;
 
-        // Ground
-        const groundMaterial = new CANNON.Material('ground');
-        const groundBody = new CANNON.Body({
-            mass: 0,
-            shape: new CANNON.Plane(),
-            material: groundMaterial,
-        });
-        groundBody.quaternion.setFromEuler(-Math.PI / 2, 0, 0);
-        this.world.addBody(groundBody);
+        // ── Materials ────────────────────────────────────────
+        this.trackMaterial = new CANNON.Material('track');
+        this.tireMaterial  = new CANNON.Material('tire');
+        this.wallMaterial  = new CANNON.Material('wall');
 
-        // Vehicle-ground contact
-        const vehicleMaterial = new CANNON.Material('vehicle');
-        this.world.addContactMaterial(
-            new CANNON.ContactMaterial(groundMaterial, vehicleMaterial, {
-                friction: 0.5,
-                restitution: 0.1,
-            })
-        );
+        // tire ↔ track — good forward traction, enough lateral grip for handling
+        this.world.addContactMaterial(new CANNON.ContactMaterial(
+            this.trackMaterial, this.tireMaterial,
+            { friction: 0.6, restitution: 0.05 },
+        ));
 
-        this.vehicleMaterial = vehicleMaterial;
+        // tire ↔ wall — slippery bounce off barriers
+        this.world.addContactMaterial(new CANNON.ContactMaterial(
+            this.tireMaterial, this.wallMaterial,
+            { friction: 0.2, restitution: 0.3 },
+        ));
+
+        // chassis ↔ wall — when body clips a wall
+        this.world.addContactMaterial(new CANNON.ContactMaterial(
+            this.tireMaterial, this.wallMaterial,
+            { friction: 0.15, restitution: 0.25 },
+        ));
+
+        // ── Track geometry ───────────────────────────────────
+        this._createTrack();
+
         this.vehicle = null;
         this.chassisBody = null;
     }
+
+    // ─────────────────────────────────────────────────────────
+    //  Track: rectangular loop + walls
+    // ─────────────────────────────────────────────────────────
+
+    _createTrack() {
+        const halfOW = OUTER_W / 2;   // 80
+        const halfOH = OUTER_H / 2;   // 50
+        const halfIW = INNER_W / 2;   // 60
+        const halfIH = INNER_H / 2;   // 30
+        const tw = TRACK_W;           // 20
+        const groundY = 0;
+        const halfThick = 0.1;        // ground slab half-thickness
+
+        // Helper: static box at position
+        const addBox = (hx, hy, hz, px, py, pz, material) => {
+            const body = new CANNON.Body({
+                mass: 0,
+                shape: new CANNON.Box(new CANNON.Vec3(hx, hy, hz)),
+                material,
+            });
+            body.position.set(px, py, pz);
+            this.world.addBody(body);
+            return body;
+        };
+
+        // ── Ground segments (track surface) ──────────────────
+        // North straight: full OUTER_W wide, tw deep
+        addBox(halfOW, halfThick, tw / 2,  0, groundY - halfThick, halfOH - tw / 2,  this.trackMaterial);
+        // South straight
+        addBox(halfOW, halfThick, tw / 2,  0, groundY - halfThick, -(halfOH - tw / 2), this.trackMaterial);
+        // East straight: tw wide, INNER_H deep
+        addBox(tw / 2, halfThick, halfIH,  halfOW - tw / 2, groundY - halfThick, 0,  this.trackMaterial);
+        // West straight
+        addBox(tw / 2, halfThick, halfIH,  -(halfOW - tw / 2), groundY - halfThick, 0, this.trackMaterial);
+
+        // ── Infield (inside the loop — keep buses from cutting) ──
+        addBox(halfIW, halfThick, halfIH, 0, groundY - halfThick - 0.01, 0, this.trackMaterial);
+
+        // ── Fallback plane far below (catch falls) ───────────
+        const fallback = new CANNON.Body({
+            mass: 0,
+            shape: new CANNON.Plane(),
+            material: this.trackMaterial,
+        });
+        fallback.quaternion.setFromEuler(-Math.PI / 2, 0, 0);
+        fallback.position.set(0, -2, 0);
+        this.world.addBody(fallback);
+
+        // ── Walls ────────────────────────────────────────────
+        const wh = WALL_HEIGHT / 2;
+        const wt = WALL_THICK / 2;
+
+        // Outer walls
+        addBox(halfOW, wh, wt,  0, wh,  halfOH + wt,  this.wallMaterial); // north outer
+        addBox(halfOW, wh, wt,  0, wh, -(halfOH + wt), this.wallMaterial); // south outer
+        addBox(wt, wh, halfOH,  halfOW + wt, wh, 0,   this.wallMaterial); // east outer
+        addBox(wt, wh, halfOH, -(halfOW + wt), wh, 0,  this.wallMaterial); // west outer
+
+        // Inner walls
+        addBox(halfIW, wh, wt,  0, wh,  halfIH + wt,  this.wallMaterial); // north inner
+        addBox(halfIW, wh, wt,  0, wh, -(halfIH + wt), this.wallMaterial); // south inner
+        addBox(wt, wh, halfIH,  halfIW + wt, wh, 0,   this.wallMaterial); // east inner
+        addBox(wt, wh, halfIH, -(halfIW + wt), wh, 0,  this.wallMaterial); // west inner
+    }
+
+    // ─────────────────────────────────────────────────────────
+    //  Vehicle
+    // ─────────────────────────────────────────────────────────
 
     createVehicle(busSpecs) {
         const mass = busSpecs.base_weight_kg || 3500;
@@ -39,10 +123,13 @@ export class PhysicsWorld {
         const chassisShape = new CANNON.Box(new CANNON.Vec3(1.0, 0.5, 2.0));
         this.chassisBody = new CANNON.Body({
             mass,
-            material: this.vehicleMaterial,
+            material: this.tireMaterial,
+            angularDamping: 0.4,
+            linearDamping: 0.05,
         });
         this.chassisBody.addShape(chassisShape);
-        this.chassisBody.position.set(0, 1.5, 0);
+        // Spawn on south straight, facing +X
+        this.chassisBody.position.set(0, 1.5, -(OUTER_H / 2 - TRACK_W / 2));
 
         const vehicle = new CANNON.RaycastVehicle({
             chassisBody: this.chassisBody,
@@ -51,8 +138,8 @@ export class PhysicsWorld {
             indexForwardAxis: 2,
         });
 
-        // Wheel options
-        const baseWheel = {
+        // Shared wheel options
+        const sharedWheel = {
             radius: 0.35,
             directionLocal: new CANNON.Vec3(0, -1, 0),
             axleLocal: new CANNON.Vec3(-1, 0, 0),
@@ -60,7 +147,6 @@ export class PhysicsWorld {
             suspensionRestLength: 0.3,
             dampingRelaxation: 3.0,
             dampingCompression: 4.0,
-            frictionSlip: 2.5,
             rollInfluence: 0.05,
             maxSuspensionForce: mass * 15,
             maxSuspensionTravel: 0.3,
@@ -68,20 +154,19 @@ export class PhysicsWorld {
             useCustomSlidingRotationalSpeed: true,
         };
 
-        const wheelPositions = [
-            new CANNON.Vec3(-1.0, 0, 1.5),   // front-left
-            new CANNON.Vec3(1.0, 0, 1.5),    // front-right
-            new CANNON.Vec3(-1.0, 0, -1.2),  // rear-left
-            new CANNON.Vec3(1.0, 0, -1.2),   // rear-right
-        ];
+        // Front wheels — lower frictionSlip → break traction sooner → understeer
+        const frontWheel = { ...sharedWheel, frictionSlip: 1.8 };
+        // Rear wheels — higher frictionSlip → hold traction → stable rear
+        const rearWheel  = { ...sharedWheel, frictionSlip: 3.0 };
 
-        wheelPositions.forEach((pos) => {
-            vehicle.addWheel({ ...baseWheel, chassisConnectionPointLocal: pos });
-        });
+        vehicle.addWheel({ ...frontWheel, chassisConnectionPointLocal: new CANNON.Vec3(-1.0, 0, 1.5) });
+        vehicle.addWheel({ ...frontWheel, chassisConnectionPointLocal: new CANNON.Vec3( 1.0, 0, 1.5) });
+        vehicle.addWheel({ ...rearWheel,  chassisConnectionPointLocal: new CANNON.Vec3(-1.0, 0, -1.2) });
+        vehicle.addWheel({ ...rearWheel,  chassisConnectionPointLocal: new CANNON.Vec3( 1.0, 0, -1.2) });
 
         vehicle.addToWorld(this.world);
 
-        // Create wheel bodies for collision
+        // Kinematic wheel bodies for visual sync
         this.wheelBodies = vehicle.wheelInfos.map((wheel) => {
             const body = new CANNON.Body({
                 mass: 0,
@@ -126,3 +211,5 @@ export class PhysicsWorld {
         this.world = null;
     }
 }
+
+export { OUTER_W, OUTER_H, INNER_W, INNER_H, TRACK_W, WALL_HEIGHT };
