@@ -1,5 +1,5 @@
 <script setup>
-import { usePage, router } from '@inertiajs/vue3';
+import { Link, usePage, router } from '@inertiajs/vue3';
 import { computed } from 'vue';
 
 const user = computed(() => usePage().props.auth.user);
@@ -16,7 +16,15 @@ function logout() {
             <p class="text-lg text-gray-300">
                 Welcome, <span class="font-semibold text-white">{{ user?.name }}</span>!
             </p>
-            <p class="text-sm text-gray-500">Dashboard coming soon — garage, lobby, and races.</p>
+
+            <div class="flex flex-col gap-3">
+                <Link
+                    href="/garage"
+                    class="rounded-md bg-amber-500 px-6 py-3 text-sm font-semibold text-gray-900 transition hover:bg-amber-400"
+                >
+                    🔧 Mi Garaje
+                </Link>
+            </div>
 
             <button
                 @click="logout"
