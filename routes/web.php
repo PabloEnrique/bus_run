@@ -6,6 +6,7 @@ use App\Http\Controllers\AuthController;
 use App\Http\Controllers\DashboardController;
 use App\Http\Controllers\GarageController;
 use App\Http\Controllers\GasStationController;
+use App\Http\Controllers\RaceController;
 use Illuminate\Support\Facades\Route;
 
 // Guest routes
@@ -24,5 +25,6 @@ Route::middleware('auth')->group(function () {
     Route::get('/garage/{bus}', [GarageController::class, 'show'])->name('garage.show');
     Route::get('/gas-station', [GasStationController::class, 'index'])->name('gas-station');
     Route::post('/gas-station/refuel', [GasStationController::class, 'refuel'])->name('gas-station.refuel');
+    Route::get('/race', [RaceController::class, 'index'])->name('race');
     Route::post('/logout', [AuthController::class, 'logout'])->name('logout');
 });
