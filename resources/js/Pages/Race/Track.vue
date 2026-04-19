@@ -163,9 +163,12 @@ function gameLoop() {
     if (keys.a) steering = maxSteer;
     if (keys.d) steering = -maxSteer;
 
-    // Apply to rear wheels (indices 2, 3)
-    physics.vehicle.applyEngineForce(engineForce, 2);
-    physics.vehicle.applyEngineForce(engineForce, 3);
+    // Apply to rear wheels (indices 2, 3).
+    // Negate: cannon-es wheel forward = contactNormal × axleLocal;
+    // with axleLocal (-1,0,0) the internal forward points -Z, but our
+    // bus front is +Z, so we flip the sign.
+    physics.vehicle.applyEngineForce(-engineForce, 2);
+    physics.vehicle.applyEngineForce(-engineForce, 3);
 
     // Steering on front wheels (indices 0, 1)
     physics.vehicle.setSteeringValue(steering, 0);
