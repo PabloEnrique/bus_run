@@ -24,6 +24,12 @@ function logout() {
                 >
                     🔧 Mi Garaje
                 </Link>
+                <Link
+                    href="/gas-station"
+                    class="rounded-md bg-green-600 px-6 py-3 text-sm font-semibold text-white transition hover:bg-green-500"
+                >
+                    ⛽ Gasolinera
+                </Link>
             </div>
 
             <button
