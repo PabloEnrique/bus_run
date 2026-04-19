@@ -156,9 +156,16 @@ export class PhysicsWorld {
     createVehicle(busSpecs) {
         const mass = busSpecs.base_weight_kg || 3500;
 
-        // Stiffness: each spring must support mass/4 with ~0.15 m static sag.
-        // F = k × x  →  k = (mass × g) / (4 × sag)  ≈  mass × 16
-        const stiffness = mass * 16;
+        // cannon-es suspensionForce = (stiffness × displacement − damping × velocity) × chassisMass.
+        // The stiffness is a NORMALISED coefficient (not N/m) — it gets multiplied by mass.
+        // Static sag = g / (4 × stiffness).  Target sag ≈ 0.12 m → stiffness ≈ 20.
+        // Natural freq = sqrt(4 × k) / 2π ≈ 1.4 Hz — realistic for a city bus.
+        const stiffness = 20;
+
+        // Damping — ζ ≈ 0.45 (moderately damped). Critical = 2 × sqrt(4 × stiffness) ≈ 18.
+        // Compression softer (comfort), relaxation stiffer (resist rebound oscillation).
+        const dampingCompression = 6.5;
+        const dampingRelaxation  = 9.8;
 
         // Chassis — collision group VEHICLE collides with WALL only (not GROUND).
         // The RaycastVehicle wheel raycasts use world.rayTest() which bypasses
@@ -185,19 +192,20 @@ export class PhysicsWorld {
             indexForwardAxis: 2,
         });
 
-        // Shared wheel options — connection point Y = -0.65 places ray origin
-        // below the chassis bottom (-0.5) so springs carry the full weight.
+        // Shared wheel options — connection point Y = −0.5 (at chassis bottom).
+        // Ray length = restLength + radius = 0.4 + 0.35 = 0.75 m.
+        // At equilibrium the chassis floats at Y ≈ 1.1 with 0.12 m sag.
         const sharedWheel = {
             radius: 0.35,
             directionLocal: new CANNON.Vec3(0, -1, 0),
             axleLocal: new CANNON.Vec3(-1, 0, 0),
             suspensionStiffness: stiffness,
-            suspensionRestLength: 0.6,
-            dampingRelaxation: 5.0,
-            dampingCompression: 4.5,
-            rollInfluence: 0.05,
-            maxSuspensionForce: mass * 20,
-            maxSuspensionTravel: 0.5,
+            suspensionRestLength: 0.4,
+            dampingRelaxation,
+            dampingCompression,
+            rollInfluence: 0.08,
+            maxSuspensionForce: 50000,
+            maxSuspensionTravel: 0.25,
             customSlidingRotationalSpeed: -30,
             useCustomSlidingRotationalSpeed: true,
         };
@@ -207,10 +215,10 @@ export class PhysicsWorld {
         // Rear wheels — higher frictionSlip → hold traction → stable rear
         const rearWheel  = { ...sharedWheel, frictionSlip: 3.0 };
 
-        vehicle.addWheel({ ...frontWheel, chassisConnectionPointLocal: new CANNON.Vec3(-1.0, -0.65, 1.5) });
-        vehicle.addWheel({ ...frontWheel, chassisConnectionPointLocal: new CANNON.Vec3( 1.0, -0.65, 1.5) });
-        vehicle.addWheel({ ...rearWheel,  chassisConnectionPointLocal: new CANNON.Vec3(-1.0, -0.65, -1.2) });
-        vehicle.addWheel({ ...rearWheel,  chassisConnectionPointLocal: new CANNON.Vec3( 1.0, -0.65, -1.2) });
+        vehicle.addWheel({ ...frontWheel, chassisConnectionPointLocal: new CANNON.Vec3(-1.0, -0.5, 1.5) });
+        vehicle.addWheel({ ...frontWheel, chassisConnectionPointLocal: new CANNON.Vec3( 1.0, -0.5, 1.5) });
+        vehicle.addWheel({ ...rearWheel,  chassisConnectionPointLocal: new CANNON.Vec3(-1.0, -0.5, -1.2) });
+        vehicle.addWheel({ ...rearWheel,  chassisConnectionPointLocal: new CANNON.Vec3( 1.0, -0.5, -1.2) });
 
         vehicle.addToWorld(this.world);
         console.log('[Physics] Wheels created:', vehicle.wheelInfos.length);

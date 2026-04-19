@@ -119,33 +119,39 @@ describe('gear_ratios parsing edge cases', () => {
 });
 
 describe('Suspension sanity — springs must support bus weight', () => {
-    it('stiffness × 4 wheels × maxTravel exceeds gravitational force', () => {
-        // Mirrors PhysicsWorld.createVehicle formula: stiffness = mass * 16
-        const mass = 3500;
+    it('cannon-es normalised stiffness produces correct sag', () => {
+        // cannon-es: suspensionForce = (stiffness × displacement) × chassisMass
+        // At equilibrium: 4 × stiffness × sag × mass = mass × g
+        // → sag = g / (4 × stiffness)
+        const stiffness = 20; // normalised cannon-es coefficient
         const g = 9.82;
-        const stiffness = mass * 16; // N/m per wheel
-        const maxTravel = 0.5; // m
 
-        const totalSpringForce = 4 * stiffness * maxTravel;
-        const weight = mass * g;
-
-        expect(totalSpringForce).toBeGreaterThan(weight);
+        const sag = g / (4 * stiffness);
+        expect(sag).toBeGreaterThan(0.08);
+        expect(sag).toBeLessThan(0.20);
     });
 
-    it('static sag is reasonable (0.10–0.25 m)', () => {
-        const mass = 3500;
-        const g = 9.82;
-        const stiffness = mass * 16;
-
-        // sag = (mass × g) / (4 × stiffness)
-        const sag = (mass * g) / (4 * stiffness);
-        expect(sag).toBeGreaterThan(0.10);
-        expect(sag).toBeLessThan(0.25);
+    it('natural frequency is in bus range (1.0–2.0 Hz)', () => {
+        const stiffness = 20;
+        const omega = Math.sqrt(4 * stiffness);
+        const freq = omega / (2 * Math.PI);
+        expect(freq).toBeGreaterThan(1.0);
+        expect(freq).toBeLessThan(2.0);
     });
 
-    it('connection point Y (-0.65) is below chassis bottom (-0.5)', () => {
+    it('damping ratio provides adequate settling (ζ > 0.3)', () => {
+        const stiffness = 20;
+        const dampRelax = 9.8;
+        const omega = Math.sqrt(4 * stiffness);
+        const cCrit = 2 * omega;
+        const zeta = dampRelax / cCrit;
+        expect(zeta).toBeGreaterThan(0.3);
+        expect(zeta).toBeLessThan(0.8);
+    });
+
+    it('connection point Y (-0.5) is at chassis bottom', () => {
         const chassisHalfHeight = 0.5;
-        const connectionY = -0.65;
-        expect(connectionY).toBeLessThan(-chassisHalfHeight);
+        const connectionY = -0.5;
+        expect(connectionY).toBe(-chassisHalfHeight);
     });
 });
