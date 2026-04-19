@@ -112,16 +112,17 @@ export class PhysicsWorld {
         // Natural freq = sqrt(4 × k) / 2π ≈ 1.4 Hz — realistic for a city bus.
         const stiffness = 20;
 
-        // Damping — ζ ≈ 0.45 (moderately damped). Critical = 2 × sqrt(4 × stiffness) ≈ 18.
-        // Compression softer (comfort), relaxation stiffer (resist rebound oscillation).
-        const dampingCompression = 6.5;
-        const dampingRelaxation  = 9.8;
+        // Damping — ζ ≈ 0.6 (heavily damped like a loaded bus).
+        // Critical = 2 × sqrt(4 × stiffness) ≈ 18.
+        // Compression moderate, relaxation near-critical to kill rebound.
+        const dampingCompression = 8.0;
+        const dampingRelaxation  = 14.0;
 
-        // Chassis — collision group VEHICLE collides with WALL only (not GROUND).
-        // The RaycastVehicle wheel raycasts use world.rayTest() which bypasses
-        // collision groups, so they still detect the ground for spring forces.
-        // Without this, the chassis box rests on the ground and pushes the wheel
-        // connection points below the surface — making all raycasts miss.
+        // Chassis — collides with GROUND + WALL + other VEHICLES.
+        // Ground collision acts as a hard safety net: if springs ever max out,
+        // the chassis physically rests on the surface instead of falling through.
+        // chassisMaterial ↔ trackMaterial has friction 0.01, restitution 0.0 —
+        // so it slides without dragging or bouncing.
         const chassisShape = new CANNON.Box(new CANNON.Vec3(1.0, 0.5, 2.0));
         this.chassisBody = new CANNON.Body({
             mass,
@@ -129,7 +130,7 @@ export class PhysicsWorld {
             angularDamping: 0.4,
             linearDamping: 0.05,
             collisionFilterGroup: COLLISION_VEHICLE,
-            collisionFilterMask: COLLISION_WALL | COLLISION_VEHICLE,
+            collisionFilterMask: COLLISION_GROUND | COLLISION_WALL | COLLISION_VEHICLE,
         });
         this.chassisBody.addShape(chassisShape);
         // Spawn at origin, just above equilibrium (~1.23) so springs engage immediately
