@@ -111,6 +111,14 @@ export class PhysicsWorld {
         }
     }
 
+    /** Average absolute angular speed of the rear wheels (indices 2, 3) in rad/s */
+    getRearWheelSpeed() {
+        if (!this.vehicle) return 0;
+        const w2 = Math.abs(this.vehicle.wheelInfos[2]?.deltaRotation || 0) / (1 / 60);
+        const w3 = Math.abs(this.vehicle.wheelInfos[3]?.deltaRotation || 0) / (1 / 60);
+        return (w2 + w3) / 2;
+    }
+
     destroy() {
         if (this.vehicle) {
             this.vehicle.removeFromWorld(this.world);
