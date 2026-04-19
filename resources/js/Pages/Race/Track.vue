@@ -313,8 +313,8 @@ onBeforeUnmount(() => {
         <div v-if="noBus" class="flex h-full items-center justify-center">
             <div class="text-center">
                 <p class="text-xl text-gray-300">No tienes guagua equipada.</p>
-                <Link href="/garage" class="mt-4 inline-block text-amber-400 hover:text-amber-300">
-                    Ir al Garaje →
+                <Link href="/race" class="mt-4 inline-block text-amber-400 hover:text-amber-300">
+                    Volver al Lobby →
                 </Link>
             </div>
         </div>
@@ -329,8 +329,8 @@ onBeforeUnmount(() => {
             <div class="text-center">
                 <p class="text-xl text-red-400">Error al iniciar</p>
                 <p class="mt-2 text-sm text-gray-500">{{ initError }}</p>
-                <Link href="/dashboard" class="mt-4 inline-block text-amber-400 hover:text-amber-300">
-                    ← Volver al Dashboard
+                <Link href="/race" class="mt-4 inline-block text-amber-400 hover:text-amber-300">
+                    ← Volver al Lobby
                 </Link>
             </div>
         </div>
@@ -343,7 +343,7 @@ onBeforeUnmount(() => {
             <!-- Top bar -->
             <div class="flex items-center justify-between px-4 py-3">
                 <div class="pointer-events-auto">
-                    <Link href="/dashboard" class="rounded bg-black/50 px-3 py-1.5 text-sm text-white backdrop-blur hover:bg-black/70">
+                    <Link href="/race" class="rounded bg-black/50 px-3 py-1.5 text-sm text-white backdrop-blur hover:bg-black/70">
                         ← Salir
                     </Link>
                 </div>

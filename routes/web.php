@@ -26,5 +26,6 @@ Route::middleware('auth')->group(function () {
     Route::get('/gas-station', [GasStationController::class, 'index'])->name('gas-station');
     Route::post('/gas-station/refuel', [GasStationController::class, 'refuel'])->name('gas-station.refuel');
     Route::get('/race', [RaceController::class, 'index'])->name('race');
+    Route::get('/race/play', [RaceController::class, 'play'])->name('race.play');
     Route::post('/logout', [AuthController::class, 'logout'])->name('logout');
 });
