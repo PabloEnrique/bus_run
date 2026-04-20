@@ -259,7 +259,7 @@ async function initGame() {
     // ── Network (non-fatal — game runs offline) ─────────────────
     console.info('[Race] Step 5/5: Connecting to game server...');
     try {
-        network = new NetworkManager('ws://localhost:2567');
+        network = new NetworkManager();
         network.onPlayerJoin((sessionId, player) => {
             const color = parseInt((player?.paintHex || '#4488ff').replace('#', ''), 16);
             scene?.addRemotePlayer(sessionId, color);
