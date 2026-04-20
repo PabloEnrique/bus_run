@@ -30,10 +30,15 @@ function generateRoomCode(): string {
     return code;
 }
 
-export class RaceRoom extends Room<{ state: RaceState }> {
+export class RaceRoom extends Room<RaceState> {
     maxClients = 8;
+    private _emptyTimeout: ReturnType<typeof setTimeout> | null = null;
+    private static readonly EMPTY_GRACE_MS = 30_000; // 30s grace period
 
     onCreate(options: JoinOptions): void {
+        // Keep room alive when empty — Track.vue needs time to rejoin after Lobby navigates
+        this.autoDispose = false;
+
         const state = new RaceState();
 
         // Room code + map set by the creator
@@ -66,6 +71,12 @@ export class RaceRoom extends Room<{ state: RaceState }> {
     }
 
     onJoin(client: Client, options: JoinOptions): void {
+        // Cancel empty-room disposal if someone joins in time
+        if (this._emptyTimeout) {
+            clearTimeout(this._emptyTimeout);
+            this._emptyTimeout = null;
+        }
+
         const player = new Player();
         player.id = options.userId || client.sessionId;
         player.torque = options.torque ?? 0;
@@ -96,6 +107,15 @@ export class RaceRoom extends Room<{ state: RaceState }> {
             ...this.metadata,
             clients: this.clients.length,
         });
+
+        // Start grace period if room is empty — dispose after 30s unless someone joins
+        if (this.clients.length === 0) {
+            console.log(`[RaceRoom] Room ${this.state.roomCode} empty — disposing in ${RaceRoom.EMPTY_GRACE_MS / 1000}s...`);
+            this._emptyTimeout = setTimeout(() => {
+                console.log(`[RaceRoom] Room ${this.state.roomCode} grace period expired — disposing.`);
+                this.disconnect();
+            }, RaceRoom.EMPTY_GRACE_MS);
+        }
     }
 
     onDispose(): void {

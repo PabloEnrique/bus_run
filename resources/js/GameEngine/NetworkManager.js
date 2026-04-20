@@ -1,8 +1,15 @@
-import { Client } from 'colyseus.js';
+import { Client, getStateCallbacks } from 'colyseus.js';
+
+const GAME_SERVER_PORT = import.meta.env.VITE_GAME_SERVER_PORT || '2567';
+
+function resolveGameServerUrl() {
+    const host = window.location.hostname || 'localhost';
+    return `ws://${host}:${GAME_SERVER_PORT}`;
+}
 
 export class NetworkManager {
-    constructor(serverUrl = 'ws://localhost:2567') {
-        this.client = new Client(serverUrl);
+    constructor(serverUrl) {
+        this.client = new Client(serverUrl || resolveGameServerUrl());
         this.room = null;
         this._callbacks = { join: null, leave: null, update: null };
         this._lastSendTime = 0;
@@ -111,11 +118,21 @@ export class NetworkManager {
     _attachListeners() {
         if (!this.room) return;
 
-        this.room.state.players.onAdd((player, sessionId) => {
+        // getStateCallbacks(room) returns a FUNCTION $().
+        // Call $(instance) to get a callback proxy for that schema instance.
+        const $ = getStateCallbacks(this.room);
+        if (!$) {
+            console.warn('[NetworkManager] Could not get state callbacks');
+            return;
+        }
+
+        const $state = $(this.room.state);
+
+        $state.players.onAdd((player, sessionId) => {
             if (sessionId === this.room.sessionId) return;
             this._callbacks.join?.(sessionId, player);
 
-            player?.onChange(() => {
+            $(player).onChange(() => {
                 this._callbacks.update?.(sessionId, {
                     x: player?.x ?? 0,
                     y: player?.y ?? 0,
@@ -126,7 +143,7 @@ export class NetworkManager {
             });
         });
 
-        this.room.state.players.onRemove((_player, sessionId) => {
+        $state.players.onRemove((_player, sessionId) => {
             this._callbacks.leave?.(sessionId);
         });
     }

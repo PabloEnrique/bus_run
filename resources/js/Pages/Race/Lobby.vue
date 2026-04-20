@@ -40,7 +40,7 @@ async function fetchRooms() {
     try {
         isLoadingRooms.value = true;
         if (!networkManager) {
-            networkManager = new NetworkManager('ws://localhost:2567');
+            networkManager = new NetworkManager();
         }
         availableRooms.value = await networkManager.listRooms();
     } catch {
@@ -70,7 +70,7 @@ async function createRoom() {
 
     try {
         if (!networkManager) {
-            networkManager = new NetworkManager('ws://localhost:2567');
+            networkManager = new NetworkManager();
         }
         const result = await networkManager.createRoom({
             mapId: selectedMapId.value,
@@ -90,9 +90,12 @@ async function createRoom() {
         });
     } catch (err) {
         console.error('[Lobby] createRoom error:', err);
-        errorMsg.value = err?.message?.includes('undefined')
-            ? 'No se pudo conectar al servidor de juego. Verifica que esté corriendo.'
-            : (err?.message || 'Error al crear la sala.');
+        const msg = err?.message || String(err);
+        if (msg.includes('fetch') || msg.includes('Failed') || msg.includes('NetworkError')) {
+            errorMsg.value = 'No se pudo conectar al servidor de juego. Verifica que esté corriendo.';
+        } else {
+            errorMsg.value = msg || 'Error al crear la sala.';
+        }
         isCreating.value = false;
     }
 }
@@ -105,7 +108,7 @@ async function joinByCode() {
 
     try {
         if (!networkManager) {
-            networkManager = new NetworkManager('ws://localhost:2567');
+            networkManager = new NetworkManager();
         }
         const code = roomCode.value.trim().toUpperCase();
         const result = await networkManager.joinByCode(code, {
