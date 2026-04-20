@@ -19,6 +19,20 @@ class BusCatalog extends Model
         'fuel_capacity_liters',
         'suspension_stiffness',
         'gear_ratios',
+        'length_m',
+        'width_m',
+        'height_m',
+        'wheelbase_m',
+        'axle_track_m',
+        'engine_hp',
+        'redline_rpm',
+        'idle_rpm',
+        'peak_torque_rpm_low',
+        'peak_torque_rpm_high',
+        'torque_idle_nm',
+        'torque_redline_nm',
+        'drag_coefficient',
+        'glb_file',
         'thumbnail_url',
     ];
 
@@ -30,13 +44,27 @@ class BusCatalog extends Model
             'fuel_capacity_liters' => 'integer',
             'suspension_stiffness' => 'float',
             'gear_ratios' => 'array',
+            'length_m' => 'float',
+            'width_m' => 'float',
+            'height_m' => 'float',
+            'wheelbase_m' => 'float',
+            'axle_track_m' => 'float',
+            'engine_hp' => 'integer',
+            'redline_rpm' => 'integer',
+            'idle_rpm' => 'integer',
+            'peak_torque_rpm_low' => 'integer',
+            'peak_torque_rpm_high' => 'integer',
+            'torque_idle_nm' => 'integer',
+            'torque_redline_nm' => 'integer',
+            'drag_coefficient' => 'float',
+            'glb_file' => 'string',
         ];
     }
 
     public function owners(): BelongsToMany
     {
         return $this->belongsToMany(User::class, 'user_garage', 'bus_id', 'user_id')
-            ->withPivot(['nickname', 'paint_hex', 'acquired_at'])
+            ->withPivot(['id', 'nickname', 'paint_hex', 'current_fuel_liters', 'acquired_at'])
             ->withTimestamps();
     }
 }

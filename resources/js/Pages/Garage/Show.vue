@@ -20,6 +20,10 @@ const powerToWeight = computed(() => {
     return (props.bus.engine_torque_nm / props.bus.base_weight_kg).toFixed(3);
 });
 
+const hpPerTon = computed(() => {
+    return ((props.bus.engine_hp / props.bus.base_weight_kg) * 1000).toFixed(1);
+});
+
 function logout() {
     router.post('/logout');
 }
@@ -65,6 +69,11 @@ function logout() {
                     <p class="text-xs text-gray-500">Nm</p>
                 </div>
                 <div class="rounded-lg border border-gray-800 bg-gray-800/50 p-4 text-center">
+                    <p class="text-xs uppercase tracking-wider text-gray-500">Potencia</p>
+                    <p class="mt-1 text-2xl font-bold text-red-300">{{ bus.engine_hp }}</p>
+                    <p class="text-xs text-gray-500">HP</p>
+                </div>
+                <div class="rounded-lg border border-gray-800 bg-gray-800/50 p-4 text-center">
                     <p class="text-xs uppercase tracking-wider text-gray-500">Peso</p>
                     <p class="mt-1 text-2xl font-bold text-blue-300">{{ bus.base_weight_kg.toLocaleString() }}</p>
                     <p class="text-xs text-gray-500">kg</p>
@@ -74,17 +83,61 @@ function logout() {
                     <p class="mt-1 text-2xl font-bold text-green-300">{{ bus.fuel_capacity_liters }}</p>
                     <p class="text-xs text-gray-500">litros</p>
                 </div>
+            </div>
+
+            <!-- Powerband -->
+            <div class="mt-4 grid grid-cols-3 gap-4">
                 <div class="rounded-lg border border-gray-800 bg-gray-800/50 p-4 text-center">
-                    <p class="text-xs uppercase tracking-wider text-gray-500">Suspensión</p>
-                    <p class="mt-1 text-2xl font-bold text-purple-300">{{ bus.suspension_stiffness }}</p>
-                    <p class="text-xs text-gray-500">rigidez</p>
+                    <p class="text-xs uppercase tracking-wider text-gray-500">Línea Roja</p>
+                    <p class="mt-1 text-xl font-bold text-red-400">{{ bus.redline_rpm?.toLocaleString() }}</p>
+                    <p class="text-xs text-gray-500">RPM</p>
+                </div>
+                <div class="rounded-lg border border-gray-800 bg-gray-800/50 p-4 text-center">
+                    <p class="text-xs uppercase tracking-wider text-gray-500">Torque Pico</p>
+                    <p class="mt-1 text-xl font-bold text-amber-300">{{ bus.peak_torque_rpm_low }}–{{ bus.peak_torque_rpm_high }}</p>
+                    <p class="text-xs text-gray-500">RPM</p>
+                </div>
+                <div class="rounded-lg border border-gray-800 bg-gray-800/50 p-4 text-center">
+                    <p class="text-xs uppercase tracking-wider text-gray-500">Cd Drag</p>
+                    <p class="mt-1 text-xl font-bold text-cyan-300">{{ bus.drag_coefficient }}</p>
+                    <p class="text-xs text-gray-500">coeficiente</p>
+                </div>
+            </div>
+
+            <!-- Dimensions -->
+            <div class="mt-4 grid grid-cols-2 gap-4 sm:grid-cols-5">
+                <div class="rounded-lg border border-gray-800 bg-gray-800/50 p-3 text-center">
+                    <p class="text-[10px] uppercase tracking-wider text-gray-500">Largo</p>
+                    <p class="mt-1 text-lg font-bold text-gray-200">{{ bus.length_m }}m</p>
+                </div>
+                <div class="rounded-lg border border-gray-800 bg-gray-800/50 p-3 text-center">
+                    <p class="text-[10px] uppercase tracking-wider text-gray-500">Ancho</p>
+                    <p class="mt-1 text-lg font-bold text-gray-200">{{ bus.width_m }}m</p>
+                </div>
+                <div class="rounded-lg border border-gray-800 bg-gray-800/50 p-3 text-center">
+                    <p class="text-[10px] uppercase tracking-wider text-gray-500">Alto</p>
+                    <p class="mt-1 text-lg font-bold text-gray-200">{{ bus.height_m }}m</p>
+                </div>
+                <div class="rounded-lg border border-gray-800 bg-gray-800/50 p-3 text-center">
+                    <p class="text-[10px] uppercase tracking-wider text-gray-500">Distancia Ejes</p>
+                    <p class="mt-1 text-lg font-bold text-gray-200">{{ bus.wheelbase_m }}m</p>
+                </div>
+                <div class="rounded-lg border border-gray-800 bg-gray-800/50 p-3 text-center">
+                    <p class="text-[10px] uppercase tracking-wider text-gray-500">Trocha</p>
+                    <p class="mt-1 text-lg font-bold text-gray-200">{{ bus.axle_track_m }}m</p>
                 </div>
             </div>
 
             <!-- Power-to-weight -->
-            <div class="mt-4 rounded-lg border border-amber-500/20 bg-amber-500/5 p-4 text-center">
-                <p class="text-xs uppercase tracking-wider text-amber-400/70">Relación Torque / Peso</p>
-                <p class="mt-1 text-xl font-bold text-amber-400">{{ powerToWeight }} Nm/kg</p>
+            <div class="mt-4 grid grid-cols-2 gap-4">
+                <div class="rounded-lg border border-amber-500/20 bg-amber-500/5 p-4 text-center">
+                    <p class="text-xs uppercase tracking-wider text-amber-400/70">Torque / Peso</p>
+                    <p class="mt-1 text-xl font-bold text-amber-400">{{ powerToWeight }} Nm/kg</p>
+                </div>
+                <div class="rounded-lg border border-red-500/20 bg-red-500/5 p-4 text-center">
+                    <p class="text-xs uppercase tracking-wider text-red-400/70">HP / Tonelada</p>
+                    <p class="mt-1 text-xl font-bold text-red-400">{{ hpPerTon }} HP/t</p>
+                </div>
             </div>
 
             <!-- Gear ratios table -->
