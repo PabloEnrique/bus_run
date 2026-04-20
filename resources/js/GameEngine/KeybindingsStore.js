@@ -10,24 +10,26 @@ const STORAGE_KEY = 'hotbusdrive_keybindings';
 
 /** @constant {object} Default key mappings (key values are KeyboardEvent.key lowercase) */
 const DEFAULT_BINDINGS = {
-    throttle:  'w',
-    brake:     's',
-    steerLeft: 'a',
-    steerRight:'d',
-    shiftUp:   'e',
-    shiftDown: 'q',
-    pause:     'escape',
+    throttle:     'w',
+    brake:        's',
+    steerLeft:    'a',
+    steerRight:   'd',
+    shiftUp:      'e',
+    shiftDown:    'q',
+    resetVehicle: 'r',
+    pause:        'escape',
 };
 
 /** Human-readable labels for each action */
 export const ACTION_LABELS = {
-    throttle:   'Acelerar',
-    brake:      'Frenar',
-    steerLeft:  'Girar izquierda',
-    steerRight: 'Girar derecha',
-    shiftUp:    'Subir marcha',
-    shiftDown:  'Bajar marcha',
-    pause:      'Pausar',
+    throttle:     'Acelerar',
+    brake:        'Frenar',
+    steerLeft:    'Girar izquierda',
+    steerRight:   'Girar derecha',
+    shiftUp:      'Subir marcha',
+    shiftDown:    'Bajar marcha',
+    resetVehicle: 'Restablecer vehículo',
+    pause:        'Pausar',
 };
 
 /**
