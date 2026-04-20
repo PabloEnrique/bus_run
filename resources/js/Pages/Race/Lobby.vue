@@ -75,7 +75,6 @@ async function createRoom() {
         const result = await networkManager.createRoom({
             mapId: selectedMapId.value,
             userId: String(user.value?.id),
-            torque: selectedBus.value?.engine_torque_nm || 0,
             weight: selectedBus.value?.base_weight_kg || 0,
             paintHex: selectedBus.value?.paint_hex || '#FFB300',
             busModel: selectedBus.value?.model || '',
@@ -86,11 +85,14 @@ async function createRoom() {
 
         router.get('/race/play', {
             bus: selectedBusId.value,
-            map: result.mapId,
+            map: result.mapId || selectedMapId.value,
             room: result.roomCode,
         });
     } catch (err) {
-        errorMsg.value = err?.message || 'Error al crear la sala.';
+        console.error('[Lobby] createRoom error:', err);
+        errorMsg.value = err?.message?.includes('undefined')
+            ? 'No se pudo conectar al servidor de juego. Verifica que esté corriendo.'
+            : (err?.message || 'Error al crear la sala.');
         isCreating.value = false;
     }
 }
@@ -108,7 +110,6 @@ async function joinByCode() {
         const code = roomCode.value.trim().toUpperCase();
         const result = await networkManager.joinByCode(code, {
             userId: String(user.value?.id),
-            torque: selectedBus.value?.engine_torque_nm || 0,
             weight: selectedBus.value?.base_weight_kg || 0,
             paintHex: selectedBus.value?.paint_hex || '#FFB300',
             busModel: selectedBus.value?.model || '',
@@ -122,7 +123,10 @@ async function joinByCode() {
             room: code,
         });
     } catch (err) {
-        errorMsg.value = err?.message || 'Sala no encontrada.';
+        console.error('[Lobby] joinByCode error:', err);
+        errorMsg.value = err?.message?.includes('undefined')
+            ? 'No se pudo conectar al servidor de juego. Verifica que esté corriendo.'
+            : (err?.message || 'Sala no encontrada.');
         isJoining.value = false;
     }
 }

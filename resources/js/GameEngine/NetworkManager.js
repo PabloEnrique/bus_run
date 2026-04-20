@@ -25,10 +25,18 @@ export class NetworkManager {
             busModel: busModel || '',
         });
         this._attachListeners();
+
+        // State may not have synced yet — read from metadata or state with fallbacks
+        const code = this.room.state?.roomCode
+            || this.room.metadata?.roomCode
+            || '';
+        const resolvedMap = this.room.state?.mapId
+            || this.room.metadata?.mapId
+            || mapId;
         return {
-            roomCode: this.room.state.roomCode,
+            roomCode: code,
             roomId: this.room.roomId,
-            mapId: this.room.state.mapId,
+            mapId: resolvedMap,
         };
     }
 
