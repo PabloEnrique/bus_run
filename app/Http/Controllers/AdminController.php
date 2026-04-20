@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Models\BusCatalog;
 use App\Models\User;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Gate;
 use Inertia\Inertia;
 use Inertia\Response;
 
@@ -15,7 +16,7 @@ class AdminController extends Controller
      */
     public function assignBuses(): Response
     {
-        $this->authorize('admin');
+        Gate::authorize('admin');
 
         $users = User::with('garage')->get()->map(fn (User $u) => [
             'id'       => $u->id,
@@ -42,7 +43,7 @@ class AdminController extends Controller
      */
     public function storeBusAssignment(Request $request)
     {
-        $this->authorize('admin');
+        Gate::authorize('admin');
 
         $validated = $request->validate([
             'user_id' => 'required|integer|exists:users,id',
