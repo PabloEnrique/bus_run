@@ -19,6 +19,10 @@ const props = defineProps({
         type: String,
         default: null,
     },
+    roomCode: {
+        type: String,
+        default: null,
+    },
 });
 
 const user = computed(() => usePage().props?.auth?.user);
@@ -35,6 +39,8 @@ const currentFuel = ref(0);
 const fuelCapacity = ref(100);
 const connected = ref(false);
 const isPaused = ref(false);
+const activeRoomCode = ref(props.roomCode || '');
+const playerCount = ref(1);
 
 let physics = null;
 let scene = null;
@@ -254,21 +260,44 @@ async function initGame() {
     console.info('[Race] Step 5/5: Connecting to game server...');
     try {
         network = new NetworkManager('ws://localhost:2567');
-        network.onPlayerJoin((sessionId) => {
-            scene?.addRemotePlayer(sessionId, 0x4488ff);
+        network.onPlayerJoin((sessionId, player) => {
+            const color = parseInt((player?.paintHex || '#4488ff').replace('#', ''), 16);
+            scene?.addRemotePlayer(sessionId, color);
+            playerCount.value++;
         });
         network.onPlayerUpdate((sessionId, pos) => {
             scene?.updateRemotePlayer(sessionId, pos);
         });
         network.onPlayerLeave((sessionId) => {
             scene?.removeRemotePlayer(sessionId);
+            playerCount.value = Math.max(1, playerCount.value - 1);
         });
 
-        await network.joinRace({
+        const netOpts = {
             userId: props.userId,
             torque: props.bus.engine_torque_nm,
             weight: props.bus.base_weight_kg,
-        });
+            paintHex: props.bus.paint_hex || '#FFB300',
+            busModel: props.bus.model || '',
+            mapId: props.mapId || DEFAULT_MAP_ID,
+        };
+
+        if (props.roomCode) {
+            // Join a specific room by its 4-char code
+            const result = await network.joinByCode(props.roomCode, netOpts);
+            activeRoomCode.value = result.roomCode;
+            console.info(`[Race] Joined room ${result.roomCode} (${result.roomId})`);
+        } else {
+            // Quick-join or create (solo / fallback)
+            await network.joinRace(netOpts);
+            activeRoomCode.value = network.room?.state?.roomCode || '';
+        }
+
+        // Set initial player count from room state
+        if (network.room?.state?.players) {
+            playerCount.value = network.room.state.players.size;
+        }
+
         connected.value = true;
         console.info('[Race] Step 5/5: Connected to game server');
     } catch (err) {
@@ -507,6 +536,8 @@ onBeforeUnmount(() => {
                     </Link>
                 </div>
                 <div class="rounded bg-black/50 px-3 py-1.5 text-sm backdrop-blur">
+                    <span v-if="activeRoomCode" class="mr-2 font-mono font-bold tracking-widest text-cyan-400">{{ activeRoomCode }}</span>
+                    <span v-if="activeRoomCode" class="mr-2 text-xs text-gray-500">{{ playerCount }} jugador{{ playerCount !== 1 ? 'es' : '' }}</span>
                     <span class="text-gray-400">{{ user?.name }}</span>
                     <span class="ml-2 text-xs" :class="connected ? 'text-green-400' : 'text-red-400'">
                         {{ connected ? '● Online' : '● Offline' }}
