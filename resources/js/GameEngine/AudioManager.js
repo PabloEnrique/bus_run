@@ -94,6 +94,26 @@ export class AudioManager {
     }
 
     /**
+     * Mute engine audio (e.g. on pause).
+     */
+    mute() {
+        if (this.gain && this.ctx && this.ctx.state !== 'closed') {
+            this.gain.gain.setTargetAtTime(0, this.ctx.currentTime, 0.02);
+        }
+    }
+
+    /**
+     * Unmute engine audio (e.g. on resume).
+     */
+    unmute() {
+        // Volume will be set correctly on the next update() call;
+        // just resume the context in case it was suspended.
+        if (this.ctx && this.ctx.state === 'suspended') {
+            this.ctx.resume();
+        }
+    }
+
+    /**
      * Tear down audio nodes and close the context.
      */
     destroy() {
