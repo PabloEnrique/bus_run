@@ -47,6 +47,7 @@ let lastTime = 0;
 let _contactLogTimer = 0;
 let _mapConfig = null;
 let _steeringSpeed = 1.0; // tuning multiplier for steering accumulation rate
+let _lastRenderTime = 0;  // for FPS lock
 
 // Input state — keyed by action name, not hardcoded key
 const actions = { throttle: false, brake: false, steerLeft: false, steerRight: false };
@@ -135,6 +136,18 @@ function onKeyDown(e) {
     if (action === 'shiftDown' && drivetrain && shiftCooldown <= 0) {
         drivetrain.shiftDown();
         shiftCooldown = 0.3;
+    }
+
+    // Vehicle reset — teleport back to spawn
+    if (action === 'resetVehicle' && physics?.chassisBody) {
+        const spawn = _mapConfig?.spawnPosition || [0, 1.5, 0];
+        const rot   = _mapConfig?.spawnRotation || [0, 0, 0, 1];
+        physics.chassisBody.position.set(spawn[0], spawn[1], spawn[2]);
+        physics.chassisBody.velocity.set(0, 0, 0);
+        physics.chassisBody.angularVelocity.set(0, 0, 0);
+        physics.chassisBody.quaternion.set(rot[0], rot[1], rot[2], rot[3]);
+        currentSteer = 0;
+        steerHoldTime = 0;
     }
 }
 
@@ -267,6 +280,11 @@ function gameLoop() {
     animFrame = requestAnimationFrame(gameLoop);
 
     const now = performance.now();
+
+    // ── FPS lock: skip frame if less than ~16.67ms (60 FPS) ──
+    if (now - _lastRenderTime < 16.0) return;
+    _lastRenderTime = now;
+
     const dt = Math.min((now - lastTime) / 1000, 0.05); // cap at 50ms
     lastTime = now;
 
@@ -400,6 +418,9 @@ function gameLoop() {
     // Camera — velocity-aware chase cam
     scene.updateCamera(playerMesh, vel);
 
+    // Speed perception effects — dynamic FOV, fog, camera shake
+    scene.updateSpeedEffects(speed);
+
     // Interpolate remote players
     scene.lerpRemotePlayers(0.15);
 
@@ -520,7 +541,7 @@ onBeforeUnmount(() => {
                 <p><kbd class="text-white">{{ keybindings.throttle.toUpperCase() }}</kbd> Acelerar · <kbd class="text-white">{{ keybindings.brake.toUpperCase() }}</kbd> Frenar</p>
                 <p><kbd class="text-white">{{ keybindings.steerLeft.toUpperCase() }}</kbd><kbd class="text-white">{{ keybindings.steerRight.toUpperCase() }}</kbd> Girar</p>
                 <p><kbd class="text-white">{{ keybindings.shiftUp.toUpperCase() }}</kbd> Subir marcha · <kbd class="text-white">{{ keybindings.shiftDown.toUpperCase() }}</kbd> Bajar</p>
-                <p class="mt-1 text-gray-600"><kbd class="text-gray-400">ESC</kbd> Pausa</p>
+                <p><kbd class="text-white">{{ keybindings.resetVehicle.toUpperCase() }}</kbd> Restablecer · <kbd class="text-gray-400">ESC</kbd> Pausa</p>
             </div>
         </div>
 
