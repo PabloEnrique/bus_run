@@ -31,11 +31,52 @@ cd "$(dirname "$0")"
 echo "🚌 Hot Bus Drive — Iniciando entorno de desarrollo"
 echo "=================================================="
 
+# 0. Instalar dependencias si es necesario
+if [[ ! -f vendor/bin/sail ]]; then
+    echo ""
+    echo "📦 vendor/ no encontrado. Instalando dependencias PHP..."
+    docker run --rm \
+        -u "$(id -u):$(id -g)" \
+        -v "$(pwd):/var/www/html" \
+        -w /var/www/html \
+        laravelsail/php83-composer:latest \
+        composer install --ignore-platform-reqs
+    echo "   ✅ Dependencias PHP instaladas."
+fi
+
+if [[ ! -f .env ]]; then
+    echo ""
+    echo "📄 .env no encontrado. Creando desde .env.example..."
+    cp .env.example .env
+    echo "   ✅ .env creado."
+fi
+
+if [[ ! -d node_modules ]]; then
+    echo ""
+    echo "📦 node_modules/ no encontrado. Instalando dependencias frontend..."
+    npm install
+    echo "   ✅ Dependencias frontend instaladas."
+fi
+
+if [[ ! -d game-server/node_modules ]]; then
+    echo ""
+    echo "📦 game-server/node_modules/ no encontrado. Instalando dependencias Colyseus..."
+    (cd game-server && npm install && npm run build)
+    echo "   ✅ Dependencias Colyseus instaladas y compiladas."
+fi
+
 # 1. Laravel Sail (Docker)
 echo ""
 echo "🐳 Levantando contenedores Docker (Sail)..."
 ./vendor/bin/sail up -d
 echo "   ✅ Sail listo."
+
+if ! ./vendor/bin/sail artisan env 2>/dev/null | grep -q 'APP_KEY'; then
+    echo ""
+    echo "🔑 Generando APP_KEY..."
+    ./vendor/bin/sail artisan key:generate
+    echo "   ✅ APP_KEY generada."
+fi
 
 # 2. Colyseus game server
 echo ""
