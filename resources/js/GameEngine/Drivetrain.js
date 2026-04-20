@@ -39,6 +39,12 @@ const IDLE_CREEP_FORCE = 350;
 const CLUTCH_ENGAGE_TIME = 0.8;
 /** @constant {number} Step size for torque interpolation table */
 const TORQUE_TABLE_STEP = 50;
+/** @constant {number} Time in seconds for full inertia ramp-up from standstill */
+const LAUNCH_INERTIA_TIME = 2.0;
+/** @constant {number} Minimum force multiplier at the start of launch (30%) */
+const LAUNCH_INERTIA_MIN = 0.30;
+/** @constant {number} Speed threshold (m/s) below which launch inertia applies */
+const LAUNCH_INERTIA_SPEED_THRESHOLD = 3.0;
 
 /**
  * Build a linearly-interpolated torque lookup table (Nm) every TORQUE_TABLE_STEP RPM.
@@ -155,6 +161,12 @@ export class Drivetrain {
 
         // ── Fuel cut state ───────────────────────────────────
         this._fuelCut = false;
+
+        // ── Launch inertia state ─────────────────────────────
+        // Tracks time since throttle was first applied from standstill.
+        // Multiplier ramps from LAUNCH_INERTIA_MIN → 1.0 over LAUNCH_INERTIA_TIME.
+        this._launchTimer = LAUNCH_INERTIA_TIME; // start fully ramped
+        this._wasThrottling = false;
 
         this.fuelCapacity = specs.fuel_capacity_liters || 100;
         this.fuel = specs.current_fuel_liters ?? this.fuelCapacity;
@@ -311,7 +323,30 @@ export class Drivetrain {
         const torqueNm = this.torqueCurve(this.rpm);
         const wheelTorque = torqueNm * this.throttle
             * Math.abs(ratio) * FINAL_DRIVE_RATIO;
-        const force = (wheelTorque / WHEEL_RADIUS) * this.clutch;
+        let force = (wheelTorque / WHEEL_RADIUS) * this.clutch;
+
+        // ── Launch inertia ───────────────────────────────────
+        // Simulates the heavy feel of a bus starting from standstill:
+        // engine force ramps from 30% → 100% over ~2 seconds when
+        // accelerating from low speed. Resets when throttle is released
+        // at low speed (ready for the next launch).
+        const speedMs = Math.abs(wheelSpeed) * WHEEL_RADIUS;
+        if (speedMs < LAUNCH_INERTIA_SPEED_THRESHOLD) {
+            if (this.throttle > 0 && !this._wasThrottling) {
+                // Throttle just pressed from standstill — reset ramp
+                this._launchTimer = 0;
+            }
+            if (this.throttle > 0) {
+                this._launchTimer = Math.min(this._launchTimer + dt, LAUNCH_INERTIA_TIME);
+            } else {
+                // No throttle at low speed — reset for next launch
+                this._launchTimer = 0;
+            }
+            const rampProgress = this._launchTimer / LAUNCH_INERTIA_TIME;
+            const inertiaMultiplier = LAUNCH_INERTIA_MIN + (1.0 - LAUNCH_INERTIA_MIN) * rampProgress;
+            force *= inertiaMultiplier;
+        }
+        this._wasThrottling = this.throttle > 0;
 
         return this.currentGear === -1 ? -force : force;
     }
@@ -337,5 +372,8 @@ export {
     CLUTCH_ENGAGE_TIME,
     IDLE_CREEP_FORCE,
     TORQUE_TABLE_STEP,
+    LAUNCH_INERTIA_TIME,
+    LAUNCH_INERTIA_MIN,
+    LAUNCH_INERTIA_SPEED_THRESHOLD,
     buildTorqueTable,
 };
