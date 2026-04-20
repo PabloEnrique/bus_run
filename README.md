@@ -11,23 +11,23 @@ Multiplayer bus racing game inspired by Caribbean public transport culture. Race
 ## Setup
 
 ```bash
-# Clone & install
+# Clone repo
 git clone git@github.com:PabloEnrique/bus_run.git
 cd bus_run
 
-# Start containers
-./vendor/bin/sail up -d
-
-# Run migrations & seed
-./vendor/bin/sail artisan migrate
-./vendor/bin/sail artisan db:seed
-
-# Install frontend deps & dev server
-npm install
-npm run dev
+# Start all services (instala dependencias automáticamente si es necesario)
+./start.sh
 ```
 
-App runs at **http://localhost**. Vite HMR at port 5173.
+`start.sh` detecta y ejecuta automáticamente lo que haga falta:
+- Instala dependencias PHP vía Docker si `vendor/` no existe
+- Crea `.env` desde `.env.example` si no existe
+- Instala dependencias frontend (`npm install`) si `node_modules/` no existe
+- Instala y compila el game server Colyseus si `game-server/node_modules/` no existe
+- Genera `APP_KEY` si no está configurada
+- Levanta Sail (Docker), Vite (HMR) y Colyseus
+
+App runs at **http://localhost**. Vite HMR at port 5173. Colyseus game server at port 2567.
 
 ## Game Features (In Progress)
 
