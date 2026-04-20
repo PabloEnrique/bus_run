@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use App\Http\Controllers\AdminController;
 use App\Http\Controllers\AuthController;
 use App\Http\Controllers\DashboardController;
 use App\Http\Controllers\GarageController;
@@ -28,4 +29,8 @@ Route::middleware('auth')->group(function () {
     Route::get('/race', [RaceController::class, 'index'])->name('race');
     Route::get('/race/play', [RaceController::class, 'play'])->name('race.play');
     Route::post('/logout', [AuthController::class, 'logout'])->name('logout');
+
+    // Admin routes (dev user only — gated by 'admin' ability)
+    Route::get('/admin/assign-buses', [AdminController::class, 'assignBuses'])->name('admin.assign-buses');
+    Route::post('/admin/assign-buses', [AdminController::class, 'storeBusAssignment'])->name('admin.store-bus-assignment');
 });
