@@ -7,12 +7,19 @@ import { NetworkManager } from '../../GameEngine/NetworkManager.js';
 import { Drivetrain } from '../../GameEngine/Drivetrain.js';
 import { AudioManager } from '../../GameEngine/AudioManager.js';
 import { getMapById, DEFAULT_MAP_ID } from '../../GameEngine/maps/index.js';
+import { keybindings, getActionForKey } from '../../GameEngine/KeybindingsStore.js';
+import { getMergedSpecs } from '../../GameEngine/TuningStore.js';
 import GaugeCluster from '../../Components/GaugeCluster.vue';
+import PauseMenu from '../../Components/PauseMenu.vue';
 
 const props = defineProps({
     bus: Object,
     userId: Number,
     mapId: {
+        type: String,
+        default: null,
+    },
+    roomCode: {
         type: String,
         default: null,
     },
@@ -31,6 +38,9 @@ const currentGear = ref('1');
 const currentFuel = ref(0);
 const fuelCapacity = ref(100);
 const connected = ref(false);
+const isPaused = ref(false);
+const activeRoomCode = ref(props.roomCode || '');
+const playerCount = ref(1);
 
 let physics = null;
 let scene = null;
@@ -42,30 +52,115 @@ let animFrame = null;
 let lastTime = 0;
 let _contactLogTimer = 0;
 let _mapConfig = null;
+let _steeringSpeed = 1.0; // tuning multiplier for steering accumulation rate
+let _lastRenderTime = 0;  // for FPS lock
 
-// Input state
-const keys = { w: false, a: false, s: false, d: false };
+// Input state — keyed by action name, not hardcoded key
+const actions = { throttle: false, brake: false, steerLeft: false, steerRight: false };
 let shiftCooldown = 0;
 let currentSteer = 0;  // current steering angle (lerped)
+let steerHoldTime = 0; // how long the steering key has been held (seconds)
+
+/**
+ * Toggle pause state. Resets lastTime on unpause to avoid dt spike.
+ */
+function togglePause() {
+    isPaused.value = !isPaused.value;
+    if (!isPaused.value) {
+        // Resuming — reset timestamp so dt doesn't include pause duration
+        lastTime = performance.now();
+    }
+    // Mute/unmute audio on pause toggle
+    if (audio) {
+        isPaused.value ? audio.mute?.() : audio.unmute?.();
+    }
+}
+
+/**
+ * Hot-reload drivetrain when tuning is applied from the pause Workshop.
+ * Rebuilds the Drivetrain with the new tuned specs while preserving
+ * current fuel level and gear.
+ * @param {object} overrides — tuning overrides just saved
+ */
+function applyTuningHotReload(overrides) {
+    if (!drivetrain || !props.bus) return;
+
+    // Preserve current gameplay state
+    const currentFuelLevel = drivetrain.fuel;
+    const currentGearState = drivetrain.currentGear;
+
+    // Rebuild merged specs from bus + freshly saved overrides
+    const tunedSpecs = getMergedSpecs(props.bus.id, props.bus);
+    _steeringSpeed = tunedSpecs.steering_speed || 1.0;
+
+    drivetrain = new Drivetrain({
+        engine_torque_nm: tunedSpecs.engine_torque_nm,
+        engine_hp: tunedSpecs.engine_hp,
+        idle_rpm: tunedSpecs.idle_rpm,
+        redline_rpm: tunedSpecs.redline_rpm,
+        peak_torque_rpm_low: tunedSpecs.peak_torque_rpm_low,
+        peak_torque_rpm_high: tunedSpecs.peak_torque_rpm_high,
+        torque_idle_nm: tunedSpecs.torque_idle_nm,
+        torque_redline_nm: tunedSpecs.torque_redline_nm,
+        gear_ratios: tunedSpecs.gear_ratios,
+        fuel_capacity_liters: props.bus.fuel_capacity_liters,
+        current_fuel_liters: currentFuelLevel,
+        base_weight_kg: props.bus.base_weight_kg,
+        drag_coefficient: props.bus.drag_coefficient,
+        width_m: props.bus.width_m,
+        height_m: props.bus.height_m,
+    });
+
+    // Restore gear position (clamped to new gear count)
+    drivetrain.currentGear = Math.min(currentGearState, drivetrain.gearCount);
+    drivetrain.fuel = currentFuelLevel;
+
+    console.info('[Race] Tuning hot-reloaded — gears:', drivetrain.gearCount, 'torque:', drivetrain.peakTorque, 'Nm, steer:', _steeringSpeed + 'x');
+}
 
 function onKeyDown(e) {
     const k = e.key.toLowerCase();
-    if (k in keys) keys[k] = true;
+    const action = getActionForKey(k);
 
-    // Gear shifting — E = up, Q = down
-    if (k === 'e' && drivetrain && shiftCooldown <= 0) {
+    // Pause toggle — works even when paused
+    if (action === 'pause') {
+        e.preventDefault();
+        togglePause();
+        return;
+    }
+
+    // Ignore game inputs while paused
+    if (isPaused.value) return;
+
+    if (action && action in actions) actions[action] = true;
+
+    // Gear shifting with cooldown
+    if (action === 'shiftUp' && drivetrain && shiftCooldown <= 0) {
         drivetrain.shiftUp();
         shiftCooldown = 0.3;
     }
-    if (k === 'q' && drivetrain && shiftCooldown <= 0) {
+    if (action === 'shiftDown' && drivetrain && shiftCooldown <= 0) {
         drivetrain.shiftDown();
         shiftCooldown = 0.3;
+    }
+
+    // Vehicle reset — teleport back to spawn
+    if (action === 'resetVehicle' && physics?.chassisBody) {
+        const spawn = _mapConfig?.spawnPosition || [0, 1.5, 0];
+        const rot   = _mapConfig?.spawnRotation || [0, 0, 0, 1];
+        physics.chassisBody.position.set(spawn[0], spawn[1], spawn[2]);
+        physics.chassisBody.velocity.set(0, 0, 0);
+        physics.chassisBody.angularVelocity.set(0, 0, 0);
+        physics.chassisBody.quaternion.set(rot[0], rot[1], rot[2], rot[3]);
+        currentSteer = 0;
+        steerHoldTime = 0;
     }
 }
 
 function onKeyUp(e) {
     const k = e.key.toLowerCase();
-    if (k in keys) keys[k] = false;
+    const action = getActionForKey(k);
+    if (action && action in actions) actions[action] = false;
 }
 
 function hexToInt(hex) {
@@ -81,16 +176,19 @@ async function initGame() {
     // ── Local init (MUST succeed — no network dependency) ────────
     try {
         console.info('[Race] Step 1/5: Creating drivetrain...');
+        // Merge bus catalog specs with any user tuning overrides
+        const tunedSpecs = getMergedSpecs(props.bus.id, props.bus);
+        _steeringSpeed = tunedSpecs.steering_speed || 1.0;
         drivetrain = new Drivetrain({
-            engine_torque_nm: props.bus.engine_torque_nm,
-            engine_hp: props.bus.engine_hp,
-            idle_rpm: props.bus.idle_rpm,
-            redline_rpm: props.bus.redline_rpm,
-            peak_torque_rpm_low: props.bus.peak_torque_rpm_low,
-            peak_torque_rpm_high: props.bus.peak_torque_rpm_high,
-            torque_idle_nm: props.bus.torque_idle_nm,
-            torque_redline_nm: props.bus.torque_redline_nm,
-            gear_ratios: props.bus.gear_ratios,
+            engine_torque_nm: tunedSpecs.engine_torque_nm,
+            engine_hp: tunedSpecs.engine_hp,
+            idle_rpm: tunedSpecs.idle_rpm,
+            redline_rpm: tunedSpecs.redline_rpm,
+            peak_torque_rpm_low: tunedSpecs.peak_torque_rpm_low,
+            peak_torque_rpm_high: tunedSpecs.peak_torque_rpm_high,
+            torque_idle_nm: tunedSpecs.torque_idle_nm,
+            torque_redline_nm: tunedSpecs.torque_redline_nm,
+            gear_ratios: tunedSpecs.gear_ratios,
             fuel_capacity_liters: props.bus.fuel_capacity_liters,
             current_fuel_liters: props.bus.current_fuel_liters,
             base_weight_kg: props.bus.base_weight_kg,
@@ -161,22 +259,45 @@ async function initGame() {
     // ── Network (non-fatal — game runs offline) ─────────────────
     console.info('[Race] Step 5/5: Connecting to game server...');
     try {
-        network = new NetworkManager('ws://localhost:2567');
-        network.onPlayerJoin((sessionId) => {
-            scene?.addRemotePlayer(sessionId, 0x4488ff);
+        network = new NetworkManager();
+        network.onPlayerJoin((sessionId, player) => {
+            const color = parseInt((player?.paintHex || '#4488ff').replace('#', ''), 16);
+            scene?.addRemotePlayer(sessionId, color);
+            playerCount.value++;
         });
         network.onPlayerUpdate((sessionId, pos) => {
             scene?.updateRemotePlayer(sessionId, pos);
         });
         network.onPlayerLeave((sessionId) => {
             scene?.removeRemotePlayer(sessionId);
+            playerCount.value = Math.max(1, playerCount.value - 1);
         });
 
-        await network.joinRace({
+        const netOpts = {
             userId: props.userId,
             torque: props.bus.engine_torque_nm,
             weight: props.bus.base_weight_kg,
-        });
+            paintHex: props.bus.paint_hex || '#FFB300',
+            busModel: props.bus.model || '',
+            mapId: props.mapId || DEFAULT_MAP_ID,
+        };
+
+        if (props.roomCode) {
+            // Join a specific room by its 4-char code
+            const result = await network.joinByCode(props.roomCode, netOpts);
+            activeRoomCode.value = result.roomCode;
+            console.info(`[Race] Joined room ${result.roomCode} (${result.roomId})`);
+        } else {
+            // Quick-join or create (solo / fallback)
+            await network.joinRace(netOpts);
+            activeRoomCode.value = network.room?.state?.roomCode || '';
+        }
+
+        // Set initial player count from room state
+        if (network.room?.state?.players) {
+            playerCount.value = network.room.state.players.size;
+        }
+
         connected.value = true;
         console.info('[Race] Step 5/5: Connected to game server');
     } catch (err) {
@@ -188,39 +309,66 @@ function gameLoop() {
     animFrame = requestAnimationFrame(gameLoop);
 
     const now = performance.now();
+
+    // ── FPS lock: skip frame if less than ~16.67ms (60 FPS) ──
+    if (now - _lastRenderTime < 16.0) return;
+    _lastRenderTime = now;
+
     const dt = Math.min((now - lastTime) / 1000, 0.05); // cap at 50ms
     lastTime = now;
 
     if (!physics || !physics.vehicle || !scene || !drivetrain) return;
+
+    // ── Pause: skip all simulation, keep rendering frozen scene ──
+    if (isPaused.value) {
+        scene.render();
+        return;
+    }
 
     // Shift cooldown
     if (shiftCooldown > 0) shiftCooldown -= dt;
 
     // Drivetrain update
     const wheelSpeed = physics.getRearWheelSpeed();
-    const throttleInput = keys.w ? 1.0 : 0;
-    const isBraking = keys.s;
+    const throttleInput = actions.throttle ? 1.0 : 0;
+    const isBraking = actions.brake;
     const engineForce = drivetrain.update(wheelSpeed, throttleInput, isBraking, dt);
 
     // Velocity / speed (used by steering + telemetry + drag)
     const vel = physics.chassisBody.velocity;
     const speed = Math.sqrt(vel.x * vel.x + vel.z * vel.z) * 3.6; // km/h
 
-    // ── Gradual steering ───────────────────────────────────
-    // Max steer angle is inversely proportional to wheelbase (longer
-    // buses turn wider) and reduces at speed for realistic understeer.
+    // ── Gradual steering (steering wheel simulation) ──────
+    // Max steer angle is larger for tighter turns, with speed-aware
+    // reduction for realistic understeer at high speed.
     const wheelbase = props.bus?.wheelbase_m || 3.5;
-    const baseMaxSteer = Math.min(0.30, 1.0 / wheelbase);  // ~0.26–0.29 rad
+    const baseMaxSteer = Math.min(0.55, 1.5 / wheelbase);  // ~0.42–0.50 rad (tighter radius)
     const speedFactor = 1 - Math.min(speed / 120, 0.6);
     const maxSteer = baseMaxSteer * speedFactor;
 
-    // Target: full lock when key held, zero when released (self-centering)
-    let targetSteer = 0;
-    if (keys.a) targetSteer = maxSteer;
-    if (keys.d) targetSteer = -maxSteer;
+    // Progressive steering: the longer the key is held, the further
+    // the steering angle increases — simulating turning a steering wheel.
+    // Short tap = gentle correction, sustained press = full lock.
+    // _steeringSpeed multiplier from Workshop tuning affects accumulation rate.
+    const isSteering = actions.steerLeft || actions.steerRight;
+    if (isSteering) {
+        steerHoldTime = Math.min(steerHoldTime + dt * _steeringSpeed, 1.2); // caps at 1.2s for full lock
+    } else {
+        steerHoldTime = Math.max(0, steerHoldTime - dt * 3 * _steeringSpeed); // quick decay when released
+    }
 
-    // Lerp rate: steer-in is fast, self-centering is faster for realism
-    const steerRate = targetSteer !== 0 ? 4.0 : 8.0;
+    // Steering progression curve: starts slow, accelerates
+    // progress 0→1 over 1.2s, eased with a quadratic curve
+    const steerProgress = Math.min(1.0, steerHoldTime / 1.2);
+    const easedProgress = steerProgress * steerProgress; // quadratic ease-in
+    const steerMagnitude = maxSteer * easedProgress;
+
+    let targetSteer = 0;
+    if (actions.steerLeft) targetSteer = steerMagnitude;
+    if (actions.steerRight) targetSteer = -steerMagnitude;
+
+    // Lerp: steer-in follows the progressive target, self-centering is fast
+    const steerRate = targetSteer !== 0 ? 6.0 : 10.0;
     currentSteer += (targetSteer - currentSteer) * Math.min(1, steerRate * dt);
 
     // Apply to rear wheels (indices 2, 3).
@@ -234,8 +382,8 @@ function gameLoop() {
     physics.vehicle.setSteeringValue(currentSteer, 0);
     physics.vehicle.setSteeringValue(currentSteer, 1);
 
-    // Manual brake (S key)
-    const manualBrake = keys.s ? 80 : 0;
+    // Manual brake
+    const manualBrake = actions.brake ? 80 : 0;
     for (let i = 0; i < 4; i++) {
         physics.vehicle.setBrake(manualBrake, i);
     }
@@ -298,6 +446,9 @@ function gameLoop() {
 
     // Camera — velocity-aware chase cam
     scene.updateCamera(playerMesh, vel);
+
+    // Speed perception effects — dynamic FOV, fog, camera shake
+    scene.updateSpeedEffects(speed);
 
     // Interpolate remote players
     scene.lerpRemotePlayers(0.15);
@@ -385,6 +536,8 @@ onBeforeUnmount(() => {
                     </Link>
                 </div>
                 <div class="rounded bg-black/50 px-3 py-1.5 text-sm backdrop-blur">
+                    <span v-if="activeRoomCode" class="mr-2 font-mono font-bold tracking-widest text-cyan-400">{{ activeRoomCode }}</span>
+                    <span v-if="activeRoomCode" class="mr-2 text-xs text-gray-500">{{ playerCount }} jugador{{ playerCount !== 1 ? 'es' : '' }}</span>
                     <span class="text-gray-400">{{ user?.name }}</span>
                     <span class="ml-2 text-xs" :class="connected ? 'text-green-400' : 'text-red-400'">
                         {{ connected ? '● Online' : '● Offline' }}
@@ -416,10 +569,14 @@ onBeforeUnmount(() => {
 
             <!-- Controls hint — bottom left -->
             <div class="absolute bottom-4 left-4 rounded bg-black/50 px-3 py-2 text-xs text-gray-500 backdrop-blur">
-                <p><kbd class="text-white">W</kbd> Acelerar · <kbd class="text-white">S</kbd> Frenar</p>
-                <p><kbd class="text-white">A</kbd><kbd class="text-white">D</kbd> Girar</p>
-                <p><kbd class="text-white">E</kbd> Subir marcha · <kbd class="text-white">Q</kbd> Bajar</p>
+                <p><kbd class="text-white">{{ keybindings.throttle.toUpperCase() }}</kbd> Acelerar · <kbd class="text-white">{{ keybindings.brake.toUpperCase() }}</kbd> Frenar</p>
+                <p><kbd class="text-white">{{ keybindings.steerLeft.toUpperCase() }}</kbd><kbd class="text-white">{{ keybindings.steerRight.toUpperCase() }}</kbd> Girar</p>
+                <p><kbd class="text-white">{{ keybindings.shiftUp.toUpperCase() }}</kbd> Subir marcha · <kbd class="text-white">{{ keybindings.shiftDown.toUpperCase() }}</kbd> Bajar</p>
+                <p><kbd class="text-white">{{ keybindings.resetVehicle.toUpperCase() }}</kbd> Restablecer · <kbd class="text-gray-400">ESC</kbd> Pausa</p>
             </div>
         </div>
+
+        <!-- Pause menu overlay -->
+        <PauseMenu v-if="isPaused && !noBus && !isLoading && !initError" :bus="bus" @resume="togglePause" @tuning-applied="applyTuningHotReload" />
     </div>
 </template>

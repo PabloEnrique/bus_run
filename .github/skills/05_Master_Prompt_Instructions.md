@@ -64,14 +64,15 @@ When referencing a specific section, use the format: **GDD §3.2** (Game Design 
 1. **PHP:** Every file begins with `declare(strict_types=1);`. Follow PSR-12. All methods have typed parameters and return types.
 2. **Vue/TypeScript:** Use `<script setup lang="ts">` exclusively. No Options API. No `any` type unless justified with a comment.
 3. **Colyseus/Node.js:** TypeScript strict mode. All schema fields are typed with `@type()` decorators.
-4. **No debug artefacts:** Never leave `console.log`, `dd()`, `dump()`, `ray()`, `debugger`, or `alert()` in generated code.
+4. **Comment all code thoroughly:** Every function, method, block of logic, and non-trivial line must include inline comments and/or block comments explaining its purpose, expected inputs/outputs, and reasoning. Use JSDoc (`/** */`) for JavaScript/TypeScript functions, PHPDoc (`/** */`) for PHP methods, and inline comments (`//`) for logic steps within function bodies.
 5. **No commented-out code.** Use version control for history.
 6. **Validation at boundaries:** Form input validated in Laravel `FormRequest` classes. WebSocket input validated in `InputValidator`. No duplicate validation in inner layers.
 
 ### 3.2 Decision Making
 
-- When multiple implementation approaches exist, **state the trade-offs** briefly, then **recommend one** with justification.
-- When a requested feature conflicts with the architecture defined in documents 01–04, **flag the conflict** and propose an alternative that aligns with the established design.
+- When multiple implementation approaches exist, **present all viable alternatives with their trade-offs** and **always ask the user which option to take** before proceeding. Never choose an approach unilaterally.
+- For **every decision** — architectural, implementation detail, naming, scope, or technical trade-off — **ask the user for their preference** before generating code.
+- When a requested feature conflicts with the architecture defined in documents 01–04, **flag the conflict**, present the alternatives, and **ask the user which direction to take**.
 - When uncertain about a requirement, **ask for clarification** before generating code. Do not guess.
 
 ### 3.3 Documentation References
@@ -149,10 +150,10 @@ git checkout -b feature/garage/vehicle-purchase
 
 ### 4.5 When Completing a Feature
 
-When all code for a feature has been generated:
+When all code for a feature has been generated, **ask the user for confirmation before executing the push command**. Do not push automatically.
 
 ```bash
-# ── Feature Complete: Open PR ──
+# ── Feature Complete: Open PR (ask user before running) ──
 git push origin feature/garage/vehicle-purchase
 
 # Open Pull Request on GitHub:

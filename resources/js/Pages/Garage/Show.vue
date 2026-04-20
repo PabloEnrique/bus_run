@@ -1,12 +1,16 @@
 <script setup>
 import { Link, usePage, router } from '@inertiajs/vue3';
-import { computed } from 'vue';
+import { computed, ref } from 'vue';
+import BusWorkshop from '../../Components/BusWorkshop.vue';
+import { hasTuning } from '../../GameEngine/TuningStore.js';
 
 const props = defineProps({
     bus: Object,
 });
 
 const user = computed(() => usePage().props.auth.user);
+const showWorkshop = ref(false);
+const isTuned = ref(hasTuning(props.bus?.id));
 
 const forwardGears = computed(() => {
     return Object.entries(props.bus.gear_ratios)
@@ -59,6 +63,17 @@ function logout() {
                     :style="{ backgroundColor: bus.paint_hex }"
                     :title="bus.paint_hex"
                 ></div>
+            </div>
+
+            <!-- Workshop button -->
+            <div class="mt-6 flex items-center gap-3">
+                <button
+                    @click="showWorkshop = true"
+                    class="rounded-lg bg-amber-500 px-5 py-2.5 text-sm font-semibold text-black transition hover:bg-amber-400"
+                >
+                    🔧 Taller
+                </button>
+                <span v-if="isTuned" class="text-xs text-amber-400/70 italic">Tuning personalizado activo</span>
             </div>
 
             <!-- Main specs -->
@@ -171,6 +186,15 @@ function logout() {
                     </table>
                 </div>
             </div>
+        </div>
+
+        <!-- Workshop overlay -->
+        <div v-if="showWorkshop" class="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm">
+            <BusWorkshop
+                :bus="bus"
+                @close="showWorkshop = false"
+                @applied="isTuned = true; showWorkshop = false"
+            />
         </div>
     </div>
 </template>

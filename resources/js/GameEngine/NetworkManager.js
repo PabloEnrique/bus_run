@@ -1,26 +1,138 @@
-import { Client } from 'colyseus.js';
+import { Client, getStateCallbacks } from 'colyseus.js';
+
+const GAME_SERVER_PORT = import.meta.env.VITE_GAME_SERVER_PORT || '2567';
+
+function resolveGameServerUrl() {
+    const host = window.location.hostname || 'localhost';
+    return `ws://${host}:${GAME_SERVER_PORT}`;
+}
 
 export class NetworkManager {
-    constructor(serverUrl = 'ws://localhost:2567') {
-        this.client = new Client(serverUrl);
+    constructor(serverUrl) {
+        this.client = new Client(serverUrl || resolveGameServerUrl());
         this.room = null;
         this._callbacks = { join: null, leave: null, update: null };
         this._lastSendTime = 0;
         this._sendInterval = 66; // ~15Hz
     }
 
-    async joinRace({ userId, torque, weight }) {
+    // ─── Room lifecycle ──────────────────────────────────────
+
+    /**
+     * Create a new room. The creator chooses the map.
+     * @returns {{ roomCode: string, roomId: string, mapId: string }}
+     */
+    async createRoom({ mapId, userId, torque, weight, paintHex, busModel }) {
+        this.room = await this.client.create('race', {
+            mapId,
+            userId: String(userId),
+            torque: torque || 0,
+            weight: weight || 0,
+            paintHex: paintHex || '#FFB300',
+            busModel: busModel || '',
+        });
+        this._attachListeners();
+
+        // State may not have synced yet — read from metadata or state with fallbacks
+        const code = this.room.state?.roomCode
+            || this.room.metadata?.roomCode
+            || '';
+        const resolvedMap = this.room.state?.mapId
+            || this.room.metadata?.mapId
+            || mapId;
+        return {
+            roomCode: code,
+            roomId: this.room.roomId,
+            mapId: resolvedMap,
+        };
+    }
+
+    /**
+     * Join a room by its 4-char code.
+     * Fetches available rooms, finds the matching code, then joins by ID.
+     */
+    async joinByCode(code, { userId, torque, weight, paintHex, busModel }) {
+        const rooms = await this.client.getAvailableRooms('race');
+        const target = rooms.find(
+            (r) => r.metadata?.roomCode?.toUpperCase() === code.toUpperCase(),
+        );
+        if (!target) {
+            throw new Error(`Sala "${code}" no encontrada o está llena.`);
+        }
+        return this.joinById(target.roomId, { userId, torque, weight, paintHex, busModel });
+    }
+
+    /**
+     * Join a room by its Colyseus room ID.
+     */
+    async joinById(roomId, { userId, torque, weight, paintHex, busModel }) {
+        this.room = await this.client.joinById(roomId, {
+            userId: String(userId),
+            torque: torque || 0,
+            weight: weight || 0,
+            paintHex: paintHex || '#FFB300',
+            busModel: busModel || '',
+        });
+        this._attachListeners();
+        return {
+            roomCode: this.room.state.roomCode,
+            roomId: this.room.roomId,
+            mapId: this.room.state.mapId,
+        };
+    }
+
+    /**
+     * Quick-join: join any available room or create one (legacy/fallback).
+     */
+    async joinRace({ userId, torque, weight, paintHex, busModel, mapId }) {
         this.room = await this.client.joinOrCreate('race', {
             userId: String(userId),
             torque: torque || 0,
             weight: weight || 0,
+            paintHex: paintHex || '#FFB300',
+            busModel: busModel || '',
+            mapId: mapId || 'city',
         });
+        this._attachListeners();
+        return this.room;
+    }
 
-        this.room.state.players.onAdd((player, sessionId) => {
+    /**
+     * List all available rooms with metadata.
+     * @returns {Promise<Array<{ roomId, roomCode, mapId, clients, maxClients }>>}
+     */
+    async listRooms() {
+        const rooms = await this.client.getAvailableRooms('race');
+        return rooms.map((r) => ({
+            roomId: r.roomId,
+            roomCode: r.metadata?.roomCode || '????',
+            mapId: r.metadata?.mapId || 'city',
+            clients: r.clients ?? 0,
+            maxClients: r.maxClients ?? 8,
+        }));
+    }
+
+    // ─── State listeners (shared) ────────────────────────────
+
+    /** @private */
+    _attachListeners() {
+        if (!this.room) return;
+
+        // getStateCallbacks(room) returns a FUNCTION $().
+        // Call $(instance) to get a callback proxy for that schema instance.
+        const $ = getStateCallbacks(this.room);
+        if (!$) {
+            console.warn('[NetworkManager] Could not get state callbacks');
+            return;
+        }
+
+        const $state = $(this.room.state);
+
+        $state.players.onAdd((player, sessionId) => {
             if (sessionId === this.room.sessionId) return;
             this._callbacks.join?.(sessionId, player);
 
-            player?.onChange(() => {
+            $(player).onChange(() => {
                 this._callbacks.update?.(sessionId, {
                     x: player?.x ?? 0,
                     y: player?.y ?? 0,
@@ -31,12 +143,12 @@ export class NetworkManager {
             });
         });
 
-        this.room.state.players.onRemove((_player, sessionId) => {
+        $state.players.onRemove((_player, sessionId) => {
             this._callbacks.leave?.(sessionId);
         });
-
-        return this.room;
     }
+
+    // ─── Callbacks ───────────────────────────────────────────
 
     onPlayerJoin(callback) {
         this._callbacks.join = callback;
@@ -49,6 +161,8 @@ export class NetworkManager {
     onPlayerUpdate(callback) {
         this._callbacks.update = callback;
     }
+
+    // ─── Position sync ───────────────────────────────────────
 
     sendPosition(position) {
         if (!this.room) return;
@@ -65,6 +179,8 @@ export class NetworkManager {
             speed: position.speed,
         });
     }
+
+    // ─── Cleanup ─────────────────────────────────────────────
 
     async leave() {
         if (this.room) {

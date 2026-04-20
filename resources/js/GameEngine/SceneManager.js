@@ -63,6 +63,12 @@ export class SceneManager {
 
         // Environment map (set by loadEnvironment)
         this._envMap = null;
+
+        // ── Speed perception state ───────────────────────────
+        this._baseFOV = 60;
+        this._baseFogNear = fogNear;
+        this._baseFogFar  = fogFar;
+        this._shakeOffset = new THREE.Vector3();
     }
 
     // ─────────────────────────────────────────────────────────
@@ -635,6 +641,36 @@ export class SceneManager {
             .add(forward.clone().multiplyScalar(lookAhead))
             .add(new THREE.Vector3(0, 1.5, 0));
         this.camera.lookAt(this._cameraTarget);
+    }
+
+    /**
+     * Speed-dependent visual effects: dynamic FOV, fog tightening, camera shake.
+     * Call once per frame from the game loop.
+     * @param {number} speedKmh — speed in km/h
+     */
+    updateSpeedEffects(speedKmh) {
+        const t = Math.min(speedKmh / 120, 1); // 0→1 over 0→120 km/h
+
+        // ── Dynamic FOV: 60° → 75° ──────────────────────────
+        const targetFOV = this._baseFOV + t * 15;
+        this.camera.fov += (targetFOV - this.camera.fov) * 0.08;
+        this.camera.updateProjectionMatrix();
+
+        // ── Fog tightening: far plane shrinks up to 30% at top speed ─
+        if (this.scene.fog) {
+            this.scene.fog.far = this._baseFogFar * (1 - t * 0.3);
+        }
+
+        // ── Camera shake: subtle vibration above 40 km/h ────
+        const shakeIntensity = Math.max(0, (speedKmh - 40) / 80) * 0.04;
+        if (shakeIntensity > 0) {
+            this._shakeOffset.set(
+                (Math.random() - 0.5) * shakeIntensity,
+                (Math.random() - 0.5) * shakeIntensity * 0.5,
+                (Math.random() - 0.5) * shakeIntensity,
+            );
+            this.camera.position.add(this._shakeOffset);
+        }
     }
 
     render() {

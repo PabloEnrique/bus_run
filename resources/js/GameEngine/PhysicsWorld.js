@@ -78,6 +78,7 @@ export class PhysicsWorld {
 
         this.vehicle = null;
         this.chassisBody = null;
+        this._hasHeightfield = this._hasHeightfield || false;
     }
 
     /**
@@ -90,10 +91,27 @@ export class PhysicsWorld {
         // ── Ground geometry ──────────────────────────────────
         if (mapConfig?.heightData) {
             // Heightfield terrain — used for maps with elevation.
-            // heightData: 2D array [rows][cols] of Y values.
-            // elementSize: metres per cell (square grid).
+            //
+            // Map data layout: data[r][c] where r→Z (rows), c→X (cols).
+            //
+            // Cannon-es Heightfield local frame:
+            //   data[xi][yi] at local position (xi*el, yi*el, data[xi][yi])
+            //   where height is in local Z.
+            //
+            // We feed the raw data (no transpose).  xi = row index, yi = col index.
+            //
+            // Rotation euler(-PI/2, 0, -PI/2) maps local→world as:
+            //   world X = local Y  = yi * el  (cols → X)  ✓
+            //   world Y = local Z  = data[xi][yi]  (height → up)  ✓
+            //   world Z = local X  = xi * el  (rows → Z)  ✓
+            //
+            // This avoids transposing the data and gives exact 1:1 alignment
+            // with the Three.js visual terrain.
             const data = mapConfig.heightData;
             const elSize = mapConfig.heightElementSize || 10;
+            const rows = data.length;
+            const cols = data[0].length;
+
             const shape = new CANNON.Heightfield(data, { elementSize: elSize });
             const ground = new CANNON.Body({
                 mass: 0,
@@ -101,16 +119,16 @@ export class PhysicsWorld {
                 material: this.trackMaterial,
                 collisionFilterGroup: COLLISION_GROUND,
             });
-            // Heightfield origin is at its corner; centre it.
-            const rows = data.length;
-            const cols = data[0].length;
+            // Centre the heightfield so it matches the Three.js terrain mesh
+            // which spans X: [-cols*el/2, +cols*el/2], Z: [-rows*el/2, +rows*el/2].
             ground.position.set(
                 -(cols * elSize) / 2,
                 0,
                 -(rows * elSize) / 2,
             );
-            ground.quaternion.setFromEuler(-Math.PI / 2, 0, 0);
+            ground.quaternion.setFromEuler(-Math.PI / 2, 0, -Math.PI / 2);
             this.world.addBody(ground);
+            this._hasHeightfield = true;
         } else {
             // Flat box ground — top surface flush at Y = 0.
             const GROUND_HALF = Math.max(500, mapConfig?.groundSize || 500);
@@ -278,11 +296,12 @@ export class PhysicsWorld {
 
         // ── Hard floor guarantee ─────────────────────────────
         // If the chassis sinks so low that any wheel connection point goes
-        // below the ground plane (Y = 0), raycasts miss the surface →
-        // springs produce zero force → bus loses traction and gets stuck.
-        // After each step we check all 4 connection points in world space
-        // and push the chassis up by the worst deficit.
-        if (this.vehicle && this.chassisBody) {
+        // below the terrain surface, raycasts miss → springs produce zero
+        // force → bus loses traction and gets stuck. After each step we
+        // check all 4 connection points and push the chassis up if needed.
+        // On heightfield maps, we skip the hard floor (terrain has variable
+        // elevation) and instead rely on a generous fallback Y threshold.
+        if (this.vehicle && this.chassisBody && !this._hasHeightfield) {
             let worstDeficit = 0;
             const pos  = this.chassisBody.position;
             const quat = this.chassisBody.quaternion;

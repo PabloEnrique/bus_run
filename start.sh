@@ -28,6 +28,16 @@ trap cleanup SIGINT SIGTERM
 
 cd "$(dirname "$0")"
 
+# Kill stale processes on required ports
+for port in 5173 2567; do
+    pids=$(lsof -ti:"$port" 2>/dev/null || true)
+    if [[ -n "$pids" ]]; then
+        echo "⚠️  Puerto $port ocupado. Matando procesos: $pids"
+        kill $pids 2>/dev/null || true
+        sleep 0.5
+    fi
+done
+
 echo "🚌 Hot Bus Drive — Iniciando entorno de desarrollo"
 echo "=================================================="
 
@@ -71,7 +81,7 @@ echo "🐳 Levantando contenedores Docker (Sail)..."
 ./vendor/bin/sail up -d
 echo "   ✅ Sail listo."
 
-if ! ./vendor/bin/sail artisan env 2>/dev/null | grep -q 'APP_KEY'; then
+if ! grep -qE '^APP_KEY=.+' .env; then
     echo ""
     echo "🔑 Generando APP_KEY..."
     ./vendor/bin/sail artisan key:generate
@@ -81,7 +91,7 @@ fi
 # 2. Colyseus game server
 echo ""
 echo "🎮 Iniciando servidor Colyseus..."
-(cd game-server && npm start) &
+(cd game-server && npm run dev) &
 COLYSEUS_PID=$!
 echo "   ✅ Colyseus arrancado (PID $COLYSEUS_PID)."
 

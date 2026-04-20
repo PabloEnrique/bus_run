@@ -1,24 +1,21 @@
-import { defineServer, defineRoom } from "colyseus";
-import cors from "cors";
+import { Server } from "colyseus";
+import { WebSocketTransport } from "@colyseus/ws-transport";
 import { monitor } from "@colyseus/monitor";
+import cors from "cors";
+import express from "express";
 import { RaceRoom } from "./rooms/RaceRoom";
 
 const PORT = Number(process.env.GAME_PORT) || 2567;
 
-const gameServer = defineServer({
-    rooms: {
-        race: defineRoom(RaceRoom),
-    },
+const app = express();
+app.use(cors());
+app.use("/colyseus", monitor());
 
-    express: (app) => {
-        app.use(cors());
-
-        // Colyseus monitor (development)
-        app.use("/colyseus", monitor());
-    },
+const gameServer = new Server({
+    transport: new WebSocketTransport({ server: app.listen(PORT) }),
 });
 
-gameServer.listen(PORT).then(() => {
-    console.log(`[GameServer] Listening on ws://localhost:${PORT}`);
-    console.log(`[GameServer] Monitor at http://localhost:${PORT}/colyseus`);
-});
+gameServer.define("race", RaceRoom);
+
+console.log(`[GameServer] Listening on ws://localhost:${PORT}`);
+console.log(`[GameServer] Monitor at http://localhost:${PORT}/colyseus`);

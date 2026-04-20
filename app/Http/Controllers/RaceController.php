@@ -87,9 +87,10 @@ class RaceController extends Controller
         ];
 
         return Inertia::render('Race/Track', [
-            'bus'    => $busData,
-            'userId' => $request->user()->id,
-            'mapId'  => $request->input('map'),
+            'bus'      => $busData,
+            'userId'   => $request->user()->id,
+            'mapId'    => $request->input('map'),
+            'roomCode' => $request->input('room'),
         ]);
     }
 }

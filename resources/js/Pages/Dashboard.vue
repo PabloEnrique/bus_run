@@ -38,6 +38,14 @@ function logout() {
                 </Link>
             </div>
 
+            <Link
+                v-if="user?.name === 'dev'"
+                href="/admin/assign-buses"
+                class="inline-block rounded-md border border-purple-600 px-6 py-2 text-sm font-semibold text-purple-400 transition hover:bg-purple-600 hover:text-white"
+            >
+                ⚙️ Admin — Asignar Guaguas
+            </Link>
+
             <button
                 @click="logout"
                 class="rounded-md border border-gray-600 px-6 py-2 text-sm text-gray-300 transition hover:border-red-500 hover:text-red-400"
